@@ -1,0 +1,13 @@
+name = "gcr-outreach-api"
+main = "src/index.ts"
+compatibility_date = "2024-06-20"
+
+[vars]
+HUNTER_API_KEY = ""
+MANYREACH_API_KEY = ""
+CF_AI_API_TOKEN = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gcr-outreach-db"
+database_id = "placeholder-will-be-replaced"
