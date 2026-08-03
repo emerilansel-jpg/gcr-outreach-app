@@ -1,6 +1,7 @@
 name = "gcr-outreach-api"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
+account_id = "d5cb3e4213b6aa69dbc2feb1499af77a"
 
 [vars]
 HUNTER_API_KEY = ""
@@ -10,4 +11,5 @@ CF_AI_API_TOKEN = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "gcr-outreach-db"
-database_id = "placeholder-will-be-replaced"
+database_id = "23825597-76b5-408d-b084-f41ad7866a4b"
+migrations_dir = "src/db/migrations"
