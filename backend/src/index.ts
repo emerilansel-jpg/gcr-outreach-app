@@ -20,8 +20,20 @@ type Variables = {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// Middleware
-app.use("*", cors());
+// Middleware - allow frontend origins (Pages, custom domain, localhost dev)
+app.use(
+  "*",
+  cors({
+    origin: [
+      "https://gcr-outreach-frontend.pages.dev",
+      "https://reach.gcrindex.org",
+      "http://localhost:5173",
+      "http://localhost:4173",
+    ],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // Initialize DB
 app.use("*", async (c, next) => {

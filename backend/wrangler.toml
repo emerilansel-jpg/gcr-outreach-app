@@ -6,7 +6,6 @@ account_id = "d5cb3e4213b6aa69dbc2feb1499af77a"
 [vars]
 HUNTER_API_KEY = ""
 MANYREACH_API_KEY = ""
-CF_AI_API_TOKEN = ""
 
 [[d1_databases]]
 binding = "DB"

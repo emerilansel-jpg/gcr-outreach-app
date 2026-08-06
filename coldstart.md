@@ -225,7 +225,8 @@ F:\GCR Outreach App\
 ### URLs
 | Service | URL |
 |---------|-----|
-| Frontend | https://gcr-outreach-frontend.pages.dev |
+| Frontend (Pages) | https://gcr-outreach-frontend.pages.dev |
+| Frontend (Custom) | https://reach.gcrindex.org *(belum aktif — butuh setup DNS)* |
 | Backend API | https://gcr-outreach-api.emerilansel.workers.dev |
 | GitHub | https://github.com/emerilansel-jpg/gcr-outreach-app |
 
@@ -250,7 +251,8 @@ user.email = emerilansel@gmail.com
 ### Yang sudah diisi
 | Key | Value | Location |
 |-----|-------|----------|
-| CF_AI_API_TOKEN | *(sudah diisi di .dev.vars)* | wrangler.toml (local) |
+| CF_AI_API_TOKEN | Ter-set sebagai **secret** di Worker | Cloudflare secret (2026-08-06) |
+| CF_AI_API_TOKEN | cfut_VtFt... (local dev) | backend/.dev.vars (gitignored) |
 
 ### Yang belum diisi (perlu user input)
 | Key | Purpose | Where to get |
@@ -258,7 +260,7 @@ user.email = emerilansel@gmail.com
 | HUNTER_API_KEY | Email lookup | https://hunter.io (free tier: 50 searches) |
 | MANYREACH_API_KEY | Email outreach | https://manyreach.com (user sudah punya akun) |
 
-### Cara isi via CLI
+### Cara isi via CLI (secrets)
 ```bash
 cd "F:\GCR Outreach App\backend"
 CLOUDFLARE_API_TOKEN=YOUR_CF_API_TOKEN \
@@ -267,6 +269,7 @@ npx wrangler secret put HUNTER_API_KEY
 
 npx wrangler secret put MANYREACH_API_KEY
 ```
+> Catatan: vars di wrangler.toml TIDAK boleh sama nama dengan secret. Kalau nama binding sudah ada di `[vars]`, secret tidak bisa dibuat — hapus dulu dari vars lalu redeploy, baru set secret.
 
 ### Cloudflare API Tokens
 | Token (truncated) | Permissions | Email |
@@ -304,6 +307,42 @@ cd frontend
 npx vite build
 CLOUDFLARE_API_TOKEN=... npx wrangler pages deploy dist --project-name gcr-outreach-frontend --commit-dirty=true
 ```
+
+---
+
+## 9b. Custom Domain: reach.gcrindex.org
+
+### Status (2026-08-06)
+- ❌ **BELUM aktif** — domain belum connect ke Cloudflare
+- Nameserver sekarang: `ns1.hostresolver.com` / `ns1.emu-dns.com` (bukan Cloudflare)
+- Domain tidak ada di 3 akun Cloudflare yang dicek
+- CORS backend sudah siap mengizinkan `https://reach.gcrindex.org`
+
+### Kenapa belum bisa otomatis
+Kedua API token tidak punya permission `Zone:Create`. Plus, mengubah nameserver domain **hanya bisa dilakukan user** di panel registrar — AI tidak punya akses ke sana.
+
+### Langkah yang harus dilakukan user (pilih salah satu)
+
+**Opsi A — Pindah DNS ke Cloudflare (disarankan, SSL otomatis):**
+1. Login https://dash.cloudflare.com → **Add a site** → masukkan `gcrindex.org` → pilih **Free plan**
+2. Cloudflare akan kasih 2 nameserver (contoh: `ns1.something.ns.cloudflare.com`)
+3. Login ke panel registrar domain (emu-dns.com / hostresolver.com) → ganti nameserver ke punya Cloudflare
+4. Tunggu ~1-24 jam sampai status Active
+5. Di Pages project `gcr-outreach-frontend` → **Custom domains** → add `reach.gcrindex.org`
+6. Selesai — akses https://reach.gcrindex.org
+
+**Opsi B — CNAME di DNS provider sekarang (lebih cepat):**
+1. Login ke panel DNS `gcrindex.org` (emu-dns.com)
+2. Tambah record:
+   - Type: **CNAME**
+   - Name: `reach`
+   - Target: `gcr-outreach-frontend.pages.dev`
+   - Proxy: (jika bisa, aktifkan)
+3. Tunggu DNS propagate (~5-30 menit)
+4. Selesai — akses https://reach.gcrindex.org (tanpa SSL otomatis dari CF Pages jika proxy tidak aktif)
+
+### Catatan CORS
+Backend sudah allow origins: `gcr-outreach-frontend.pages.dev`, `reach.gcrindex.org`, `localhost:5173/4173` (backend/src/index.ts)
 
 ---
 
@@ -355,7 +394,7 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 - [ ] A/B testing untuk message variants
 - [ ] Webhook handler untuk real-time reply detection
 - [ ] Chrome extension untuk LinkedIn outreach
-- [ ] Custom domain untuk frontend
+- [ ] Custom domain untuk frontend — **proses sedang berjalan** (lihat section 9b)
 
 ### Technical Debt
 - [ ] Code splitting untuk frontend (chunk > 500KB warning)
@@ -381,7 +420,31 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 
 ---
 
-## 14. Cost Estimate (Cloudflare Free Tier)
+## 14. Email Lookup Pricing Comparison (riset 2026-08-06)
+
+> Pertanyaan user: "solusi termurah untuk email/contact lookup (alternatif Apollo.io)?"
+
+| Service | Harga | Credits/bulan | API? | Notes |
+|---------|-------|---------------|------|-------|
+| **Hunter.io Free** | **$0** | 50/bulan | ✅ | Satu-satunya free tier dengan API |
+| **Tomba.io** | ~$44.50/5.000 credits | ~415/bulan (12 bln) | ✅ | Termurah per lookup, verification gratis |
+| **Anymail Finder** | $29-49/bulan | 400-1.000 | ✅ | Termurah per bulan, credit rollover |
+| **Snov.io** | $39/bulan | 1.000 | ✅ | Brand familiar |
+| **Hunter.io Starter** | $49/bulan | 2.000 | ✅ | |
+| **Prospeo** | $49/bulan | 2.000 | ✅ | Free tier 100/bln TANPA API |
+| **Skrapp.io** | $349/bulan | 50.000 | ⚠️ API hanya Enterprise | Tidak cocok |
+| **Apollo.io** | Mahal | - | ❌ **API hanya Custom plan** | Tidak murah |
+
+### Rekomendasi (volume 100-500 lookup/bulan)
+1. **$0**: Hunter.io Free — 50 lookup/bulan, cukup untuk testing
+2. **Termurah per lookup**: Tomba.io — $44.50/5.000 credits, verification gratis
+3. **Termurah per bulan**: Anymail Finder $29/bulan — 400 verified, credit rollover
+
+**Keputusan sekarang**: Tetap pakai integrasi **Hunter.io** yang sudah ada di code (menunggu API key). Kalau mau pindah ke Tomba/Anymail, tinggal tambah service baru di `backend/src/services/`.
+
+---
+
+## 15. Cost Estimate (Cloudflare Free Tier)
 
 | Service | Cost |
 |---------|------|
