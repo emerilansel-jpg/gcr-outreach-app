@@ -4,8 +4,18 @@ compatibility_date = "2024-06-20"
 account_id = "d5cb3e4213b6aa69dbc2feb1499af77a"
 
 [vars]
-HUNTER_API_KEY = ""
-MANYREACH_API_KEY = ""
+# Secrets are set with `npx wrangler secret put <NAME>` (not here) to avoid a
+# binding-name clash at deploy time. Set them with:
+#   npx wrangler secret put ANYMAIL_API_KEY
+#   npx wrangler secret put MANYREACH_API_KEY
+#   npx wrangler secret put REOON_API_KEY        # Reoon Email Verifier
+#   npx wrangler secret put OUTSCRAPER_API_KEY   # Outscraper lead scraping
+#   npx wrangler secret put CF_AI_API_TOKEN
+# For local dev, put them in backend/.dev.vars (gitignored).
+ACCOUNT_ID = "d5cb3e4213b6aa69dbc2feb1499af77a"
+
+[ai]
+binding = "AI"
 
 [[d1_databases]]
 binding = "DB"

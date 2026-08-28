@@ -6,16 +6,29 @@ import contactRoutes from "./routes/contacts";
 import messageRoutes from "./routes/messages";
 import analyticsRoutes from "./routes/analytics";
 import emailLookupRoutes from "./routes/email-lookup";
+import leadsRoutes from "./routes/leads";
 
 type Bindings = {
   DB: D1Database;
-  HUNTER_API_KEY: string;
+  AI: Ai;
+  ACCOUNT_ID: string;
+  ANYMAIL_API_KEY: string;
   MANYREACH_API_KEY: string;
+  REOON_API_KEY: string;
+  OUTSCRAPER_API_KEY: string;
   CF_AI_API_TOKEN: string;
 };
 
 type Variables = {
   db: ReturnType<typeof createDb>;
+};
+
+type Ai = {
+  run: (
+    model: string,
+    inputs: { messages: Array<{ role: string; content: string }> },
+    options?: Record<string, unknown>
+  ) => Promise<{ response?: string }>;
 };
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -52,6 +65,7 @@ app.route("/api/contacts", contactRoutes);
 app.route("/api/messages", messageRoutes);
 app.route("/api/analytics", analyticsRoutes);
 app.route("/api/email-lookup", emailLookupRoutes);
+app.route("/api/leads", leadsRoutes);
 
 // ManyReach webhook endpoint
 app.post("/api/webhooks/manyreach", async (c) => {

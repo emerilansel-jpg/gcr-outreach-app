@@ -1,5 +1,5 @@
 const API_URL = import.meta.env.PROD
-  ? "https://gcr-outreach-api.emerilansel.workers.dev"
+  ? "https://gcr-outreach-api.emerilansel.workers.dev/api"
   : "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -83,6 +83,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ contactIds }),
     }),
+  verifyEmail: (contactId: number, provider?: string) =>
+    request<any>(`/email-lookup/verify/${contactId}`, {
+      method: "POST",
+      body: JSON.stringify({ provider: provider ?? "reoon" }),
+    }),
+
+  // Leads (Outscraper scraping)
+  scrapeLeads: (campaignId: number, params: { query: string | string[]; limit?: number; enrichment?: string[] }) =>
+    request<any>(`/leads/scrape/${campaignId}`, {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
+  getScrapeJobs: (campaignId: number) =>
+    request<any[]>(`/leads/jobs/${campaignId}`),
 
   // Analytics
   getAnalytics: () => request<any>("/analytics/overview"),

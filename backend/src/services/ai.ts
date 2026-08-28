@@ -1,7 +1,17 @@
 interface Env {
+  AI?: Ai;
   CF_AI_API_TOKEN: string;
+  ACCOUNT_ID: string;
   DB: D1Database;
 }
+
+type Ai = {
+  run: (
+    model: string,
+    inputs: { messages: Array<{ role: string; content: string }> },
+    options?: Record<string, unknown>
+  ) => Promise<{ response?: string }>;
+};
 
 interface ContactInfo {
   name: string;
@@ -60,50 +70,111 @@ ${channel === "email" ? '- Return JSON: {"subject": "...", "body": "..."}' : '- 
 
 Return ONLY valid JSON, no markdown.`;
 
-  const response = await fetch(
-    "https://api.cloudflare.com/client/v4/accounts/placeholder/accounts/ai/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.CF_AI_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "@cf/meta/llama-3.1-8b-instruct",
+  const systemPrompt =
+    "You are an expert outreach copywriter. Always return valid JSON.";
+
+  // The Workers AI binding may return `response` as a string OR as an already
+  // parsed object (depending on the model). Normalize to a {subject, body}.
+  let parsedResult: { subject?: string; body: string } | null = null;
+
+  if (env.AI) {
+    // Preferred path: built-in Workers AI binding (no API token required).
+    const result = await env.AI.run(
+      "@cf/meta/llama-3.2-3b-instruct",
+      {
         messages: [
-          {
-            role: "system",
-            content:
-              "You are an expert outreach copywriter. Always return valid JSON.",
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: prompt },
         ],
-        temperature: 0.7,
-        max_tokens: 1024,
-      }),
+      },
+      { temperature: 0.7, max_tokens: 1024 }
+    );
+    const resp = (result as any).response;
+    if (resp && typeof resp === "object") {
+      parsedResult = { subject: resp.subject, body: resp.body ?? "" };
+    } else if (typeof resp === "string") {
+      parsedResult = extractJson(resp);
     }
-  );
+  } else {
+    // Fallback: REST API using a token that has Workers AI permission.
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${env.ACCOUNT_ID}/ai/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.CF_AI_API_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "@cf/meta/llama-3.2-3b-instruct",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.7,
+          max_tokens: 1024,
+        }),
+      }
+    );
 
-  if (!response.ok) {
-    throw new Error(`AI API error: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`AI API error: ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      result?: { response: string };
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const respStr =
+      data.result?.response ||
+      data.choices?.[0]?.message?.content ||
+      "";
+    parsedResult = extractJson(respStr);
   }
 
-  const data = (await response.json()) as {
-    result: { response: string };
-  };
-  const text = data.result?.response || "";
-
-  // Parse JSON from response
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-  } catch {
-    // Fallback: return raw text as body
+  if (parsedResult && typeof parsedResult.body === "string" && parsedResult.body.trim().length > 0) {
+    return { subject: parsedResult.subject, body: parsedResult.body };
   }
 
-  return { body: text };
+  // Fallback: return whatever we have as the raw body.
+  return { body: parsedResult?.body ?? "" };
+}
+
+function extractJson(raw: string): { subject?: string; body: string } | null {
+    // 1. Direct parse.
+    try {
+      const parsed = JSON.parse(raw.trim());
+      if (parsed && typeof parsed === "object") {
+        return { subject: parsed.subject, body: parsed.body ?? raw };
+      }
+    } catch {
+      /* try other strategies */
+    }
+    // 2. Strip ```json ... ``` fences.
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+      try {
+        const parsed = JSON.parse(fenced[1].trim());
+        if (parsed && typeof parsed === "object") {
+          return { subject: parsed.subject, body: parsed.body ?? raw };
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    // 3. Grab the first balanced { ... } block.
+    const brace = raw.match(/\{[\s\S]*\}/);
+    if (brace) {
+      try {
+        const parsed = JSON.parse(brace[0]);
+        if (parsed && typeof parsed === "object") {
+          return { subject: parsed.subject, body: parsed.body ?? raw };
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return null;
 }
 
 export async function generateBulkPitches(

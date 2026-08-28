@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { eq, desc } from "drizzle-orm";
-import { campaigns, contacts } from "../db/schema";
+import { campaigns, contacts, messages, emailEnrichments } from "../db/schema";
 import type { Database } from "../db";
 
 const campaignRoutes = new Hono<{ Variables: { db: Database } }>();
@@ -112,7 +112,17 @@ campaignRoutes.delete("/:id", async (c) => {
   const db = c.get("db");
   const id = Number(c.req.param("id"));
 
-  // Delete associated contacts first
+  // Delete in FK order so no child row points at a contact we're removing:
+  // messages.contact_id, email_enrichments.contact_id -> contacts.id
+  const campaignContacts = await db
+    .select({ id: contacts.id })
+    .from(contacts)
+    .where(eq(contacts.campaignId, id));
+
+  for (const c of campaignContacts) {
+    await db.delete(messages).where(eq(messages.contactId, c.id));
+    await db.delete(emailEnrichments).where(eq(emailEnrichments.contactId, c.id));
+  }
   await db.delete(contacts).where(eq(contacts.campaignId, id));
   await db.delete(campaigns).where(eq(campaigns.id, id));
 

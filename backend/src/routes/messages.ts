@@ -3,12 +3,12 @@ import { eq, desc } from "drizzle-orm";
 import { messages, contacts, campaigns } from "../db/schema";
 import type { Database } from "../db";
 import { generatePersonalizedPitch } from "../services/ai";
-import { sendEmail } from "../services/manyreach";
+import { addProspect, createCampaign } from "../services/manyreach";
 
 interface Env {
   DB: D1Database;
-  HUNTER_API_KEY: string;
   MANYREACH_API_KEY: string;
+  ACCOUNT_ID: string;
   CF_AI_API_TOKEN: string;
 }
 
@@ -58,24 +58,30 @@ messageRoutes.post("/generate/:contactId", async (c) => {
   const campaign = campaignResult[0];
 
   // Generate pitch
-  const pitch = await generatePersonalizedPitch(
-    env,
-    {
-      name: contact.name,
-      website: contact.website || undefined,
-      socialUrl: contact.socialUrl || undefined,
-      company: contact.company || undefined,
-      title: contact.title || undefined,
-      email: contact.email || undefined,
-    },
-    {
-      name: campaign.name,
-      missionContext: campaign.missionContext,
-      tone: campaign.tone || "professional",
-      targetAudience: campaign.targetAudience || undefined,
-    },
-    body.channel
-  );
+  let pitch;
+  try {
+    pitch = await generatePersonalizedPitch(
+      env,
+      {
+        name: contact.name,
+        website: contact.website || undefined,
+        socialUrl: contact.socialUrl || undefined,
+        company: contact.company || undefined,
+        title: contact.title || undefined,
+        email: contact.email || undefined,
+      },
+      {
+        name: campaign.name,
+        missionContext: campaign.missionContext,
+        tone: campaign.tone || "professional",
+        targetAudience: campaign.targetAudience || undefined,
+      },
+      body.channel
+    );
+  } catch (err) {
+    console.error("Pitch generation failed:", err);
+    return c.json({ error: "Pitch generation failed", detail: (err as Error).message }, 500);
+  }
 
   // Save message as draft
   const messageResult = await db
@@ -84,8 +90,8 @@ messageRoutes.post("/generate/:contactId", async (c) => {
       contactId,
       campaignId: contact.campaignId,
       channel: body.channel,
-      subject: pitch.subject,
-      body: pitch.body,
+      subject: pitch.subject != null ? String(pitch.subject) : null,
+      body: typeof pitch.body === "string" ? pitch.body : JSON.stringify(pitch.body ?? ""),
       status: "draft",
     })
     .returning();
@@ -182,60 +188,40 @@ messageRoutes.put("/:id", async (c) => {
   return c.json(result[0]);
 });
 
-// Send a single message via ManyReach
-messageRoutes.post("/send/:id", async (c) => {
-  const db = c.get("db");
-  const env = c.env;
-  const id = Number(c.req.param("id"));
-
-  // Get message
-  const msgResult = await db
-    .select()
-    .from(messages)
-    .where(eq(messages.id, id));
-
-  if (msgResult.length === 0) {
-    return c.json({ error: "Message not found" }, 404);
-  }
-  const msg = msgResult[0];
-
-  // Get contact for email
-  const contactResult = await db
-    .select()
-    .from(contacts)
-    .where(eq(contacts.id, msg.contactId));
-
-  if (contactResult.length === 0 || !contactResult[0].email) {
-    return c.json({ error: "Contact has no email" }, 400);
-  }
-
-  const contact = contactResult[0];
-  const contactEmail = contact.email!;
-
-  // Send via ManyReach
-  const sendResult = await sendEmail(env.MANYREACH_API_KEY, {
-    to: contactEmail,
-    subject: msg.subject || "Outreach",
-    body: msg.body,
-    tags: ["gcr-outreach"],
+// Helper: queue a single message into ManyReach as a campaign prospect.
+// ManyReach is a drip-campaign platform: we keep ONE ManyReach campaign per GCR
+// campaign (stored as a contact tag) and add each contact as a prospect. The
+// personalized pitch lives on the prospect's `icebreaker` field.
+async function queueMessageViaManyReach(
+  db: Database,
+  env: Env,
+  msg: typeof messages.$inferSelect,
+  contact: typeof contacts.$inferSelect,
+  campaignId: number
+) {
+  const nameParts = contact.name.split(" ");
+  const addResult = await addProspect(env.MANYREACH_API_KEY, campaignId, {
+    email: contact.email!,
+    firstName: nameParts[0] ?? "",
+    lastName: nameParts.slice(1).join(" ") ?? "",
+    company: contact.company ?? undefined,
+    icebreaker: msg.body,
   });
 
-  if (!sendResult.success) {
-    return c.json({ error: sendResult.error }, 500);
+  if (!addResult.success) {
+    return { success: false as const, error: addResult.error };
   }
 
-  // Update message status
   const updated = await db
     .update(messages)
     .set({
       status: "sent",
       sentAt: new Date().toISOString(),
-      manyreachId: sendResult.messageId,
+      manyreachId: String(addResult.prospectId),
     })
-    .where(eq(messages.id, id))
+    .where(eq(messages.id, msg.id))
     .returning();
 
-  // Update contact status
   await db
     .update(contacts)
     .set({
@@ -243,9 +229,85 @@ messageRoutes.post("/send/:id", async (c) => {
       kanbanStage: "follow_up_1",
       updatedAt: new Date().toISOString(),
     })
-    .where(eq(contacts.id, msg.contactId));
+    .where(eq(contacts.id, contact.id));
 
-  return c.json(updated[0]);
+  return { success: true as const, message: updated[0] };
+}
+
+// Resolve (or create) the ManyReach campaign that mirrors this GCR campaign.
+async function resolveManyReachCampaign(
+  db: Database,
+  env: Env,
+  gcrCampaignId: number
+): Promise<{ campaignId?: number; error?: string }> {
+  const campaignResult = await db
+    .select()
+    .from(campaigns)
+    .where(eq(campaigns.id, gcrCampaignId));
+  if (campaignResult.length === 0) {
+    return { error: "Campaign not found" };
+  }
+  const campaign = campaignResult[0];
+  if (campaign.manyreachCampaignId) {
+    return { campaignId: campaign.manyreachCampaignId };
+  }
+
+  const created = await createCampaign(env.MANYREACH_API_KEY, {
+    name: `GCR: ${campaign.name}`,
+    fromEmail: "noreply@gcrindex.org",
+    fromName: "GCR Outreach",
+    subject: campaign.name,
+  });
+  if (!created.success || !created.campaignId) {
+    return { error: created.error ?? "Failed to create ManyReach campaign" };
+  }
+
+  await db
+    .update(campaigns)
+    .set({ manyreachCampaignId: created.campaignId, updatedAt: new Date().toISOString() })
+    .where(eq(campaigns.id, gcrCampaignId));
+
+  return { campaignId: created.campaignId };
+}
+
+// Send a single message via ManyReach
+messageRoutes.post("/send/:id", async (c) => {
+  const db = c.get("db");
+  const env = c.env;
+  const id = Number(c.req.param("id"));
+
+  if (!env.MANYREACH_API_KEY) {
+    return c.json({ error: "MANYREACH_API_KEY not configured" }, 400);
+  }
+
+  const msgResult = await db
+    .select()
+    .from(messages)
+    .where(eq(messages.id, id));
+  if (msgResult.length === 0) {
+    return c.json({ error: "Message not found" }, 404);
+  }
+  const msg = msgResult[0];
+
+  const contactResult = await db
+    .select()
+    .from(contacts)
+    .where(eq(contacts.id, msg.contactId));
+  if (contactResult.length === 0 || !contactResult[0].email) {
+    return c.json({ error: "Contact has no email" }, 400);
+  }
+  const contact = contactResult[0];
+
+  const resolved = await resolveManyReachCampaign(db, env, msg.campaignId);
+  if (resolved.error || !resolved.campaignId) {
+    return c.json({ error: resolved.error }, 500);
+  }
+
+  const result = await queueMessageViaManyReach(db, env, msg, contact, resolved.campaignId);
+  if (!result.success) {
+    return c.json({ error: result.error }, 500);
+  }
+  return c.json(result.message);
 });
 
 // Bulk send messages
@@ -254,6 +316,10 @@ messageRoutes.post("/bulk-send", async (c) => {
   const env = c.env;
   const body = await c.req.json<{ messageIds: number[] }>();
 
+  if (!env.MANYREACH_API_KEY) {
+    return c.json({ error: "MANYREACH_API_KEY not configured" }, 400);
+  }
+
   const results = [];
   for (const msgId of body.messageIds) {
     try {
@@ -261,52 +327,38 @@ messageRoutes.post("/bulk-send", async (c) => {
         .select()
         .from(messages)
         .where(eq(messages.id, msgId));
-
       if (msgResult.length === 0) {
         results.push({ messageId: msgId, error: "Message not found" });
         continue;
       }
-
       const msg = msgResult[0];
+
       const contactResult = await db
         .select()
         .from(contacts)
         .where(eq(contacts.id, msg.contactId));
-
       if (contactResult.length === 0 || !contactResult[0].email) {
         results.push({ messageId: msgId, error: "No email" });
         continue;
       }
+      const contact = contactResult[0];
 
-      const sendResult = await sendEmail(env.MANYREACH_API_KEY, {
-        to: contactResult[0].email,
-        subject: msg.subject || "Outreach",
-        body: msg.body,
-        tags: ["gcr-outreach"],
-      });
+      // Resolve the ManyReach campaign for THIS message's GCR campaign. Messages
+      // in a bulk send can belong to different campaigns, so we resolve per message
+      // (resolveManyReachCampaign caches the id on the campaign row, so repeated
+      // lookups hit the DB only once per distinct campaign).
+      const resolved = await resolveManyReachCampaign(db, env, msg.campaignId);
+      if (resolved.error || !resolved.campaignId) {
+        results.push({ messageId: msgId, error: resolved.error });
+        continue;
+      }
+      const campaignId = resolved.campaignId;
 
-      if (sendResult.success) {
-        await db
-          .update(messages)
-          .set({
-            status: "sent",
-            sentAt: new Date().toISOString(),
-            manyreachId: sendResult.messageId,
-          })
-          .where(eq(messages.id, msgId));
-
-        await db
-          .update(contacts)
-          .set({
-            status: "contacted",
-            kanbanStage: "follow_up_1",
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(contacts.id, msg.contactId));
-
+      const result = await queueMessageViaManyReach(db, env, msg, contact, campaignId);
+      if (result.success) {
         results.push({ messageId: msgId, success: true });
       } else {
-        results.push({ messageId: msgId, error: sendResult.error });
+        results.push({ messageId: msgId, error: result.error });
       }
     } catch (error) {
       results.push({ messageId: msgId, error: (error as Error).message });

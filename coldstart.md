@@ -22,8 +22,8 @@ Full-stack outreach app untuk GCR campaigns. User input daftar nama/website/soci
 | Backend | Hono (Cloudflare Workers) | 4.4 |
 | Database | Cloudflare D1 (SQLite) | - |
 | ORM | Drizzle ORM | 0.31 |
-| AI | Cloudflare Workers AI (Llama 3.1 8B) | - |
-| Email Lookup | Hunter.io API | - |
+| AI | Cloudflare Workers AI (built-in `AI` binding, model `@cf/meta/llama-3.2-3b-instruct`) | - |
+| Email Lookup | Anymail Finder API (discovery + verify) | - |
 | Email Outreach | ManyReach API | - |
 | Charts | Recharts | 2.12 |
 | Drag & Drop | @dnd-kit | 6.1 |
@@ -62,7 +62,7 @@ Full-stack outreach app untuk GCR campaigns. User input daftar nama/website/soci
          ▼                          ▼
 ┌─────────────────┐    ┌─────────────────────┐
 │  External APIs   │    │  External APIs       │
-│  - Hunter.io     │    │  - ManyReach         │
+│  - Anymail Finder│    │  - ManyReach         │
 │  (email lookup)  │    │  (email sending)     │
 └─────────────────┘    └─────────────────────┘
 ```
@@ -96,10 +96,10 @@ F:\GCR Outreach App\
 │       │   ├── contacts.ts         # CRUD contacts + kanban
 │       │   ├── messages.ts         # Generate/send messages
 │       │   ├── analytics.ts        # Dashboard stats
-│       │   └── email-lookup.ts     # Hunter.io integration
+│       │   └── email-lookup.ts     # Anymail Finder integration
 │       └── services/
 │           ├── ai.ts               # Cloudflare Workers AI
-│           ├── hunter.ts           # Hunter.io API client
+│           ├── anymailfinder.ts    # Anymail Finder API client
 │           └── manyreach.ts        # ManyReach API client
 │
 └── frontend/                       # React SPA
@@ -140,8 +140,8 @@ F:\GCR Outreach App\
 | mission_context | TEXT | Deskripsi misi outreach |
 | tone | TEXT | professional/casual/friendly/formal |
 | target_audience | TEXT | Optional target description |
-| created_at | TEXT | datetime default |
-| updated_at | TEXT | datetime default |
+| created_at | TEXT | `datetime('now')` default (real timestamp) |
+| updated_at | TEXT | `datetime('now')` default (real timestamp) |
 
 ### contacts
 | Column | Type | Notes |
@@ -151,7 +151,7 @@ F:\GCR Outreach App\
 | name | TEXT | Contact name |
 | website | TEXT | Company/personal website |
 | social_url | TEXT | LinkedIn/X URL |
-| email | TEXT | Found via Hunter.io |
+| email | TEXT | Found via Anymail Finder |
 | email_verified | INTEGER | 0/1 boolean |
 | company | TEXT | Company name |
 | title | TEXT | Job title |
@@ -183,7 +183,7 @@ F:\GCR Outreach App\
 | id | INTEGER PK | Auto increment |
 | contact_id | INTEGER FK | References contacts.id |
 | email | TEXT | Found email |
-| confidence | INTEGER | Hunter.io confidence score |
+| confidence | INTEGER | Anymail Finder confidence score |
 | sources | TEXT | JSON array of sources |
 | verified_at | TEXT | |
 | created_at | TEXT | |
@@ -212,8 +212,11 @@ F:\GCR Outreach App\
 | PUT | `/api/messages/:id` | Edit message |
 | POST | `/api/messages/send/:id` | Send via ManyReach |
 | POST | `/api/messages/bulk-send` | Bulk send |
-| POST | `/api/email-lookup/contact/:id` | Hunter.io lookup |
+| POST | `/api/email-lookup/contact/:id` | Anymail Finder lookup |
 | POST | `/api/email-lookup/bulk` | Bulk email lookup |
+| POST | `/api/email-lookup/verify/:id` | Verify email (Reoon → Anymail → ManyReach) |
+| POST | `/api/leads/scrape/:campaignId` | Outscraper scrape leads → contacts |
+| GET | `/api/leads/jobs/:campaignId` | Scrape history |
 | GET | `/api/analytics/overview` | Dashboard stats |
 | GET | `/api/analytics/campaign/:id` | Campaign stats |
 | POST | `/api/webhooks/manyreach` | Delivery webhook |
@@ -226,7 +229,7 @@ F:\GCR Outreach App\
 | Service | URL |
 |---------|-----|
 | Frontend (Pages) | https://gcr-outreach-frontend.pages.dev |
-| Frontend (Custom) | https://reach.gcrindex.org *(belum aktif — butuh setup DNS)* |
+| Frontend (Custom) | https://reach.gcrindex.org *(AKTIF — DNS CNAME di Spaceship → Pages)* |
 | Backend API | https://gcr-outreach-api.emerilansel.workers.dev |
 | GitHub | https://github.com/emerilansel-jpg/gcr-outreach-app |
 
@@ -253,23 +256,56 @@ user.email = emerilansel@gmail.com
 |-----|-------|----------|
 | CF_AI_API_TOKEN | Ter-set sebagai **secret** di Worker | Cloudflare secret (2026-08-06) |
 | CF_AI_API_TOKEN | cfut_VtFt... (local dev) | backend/.dev.vars (gitignored) |
+| ANYMAIL_API_KEY | Ter-set sebagai **secret** (email lookup + verify) | Cloudflare secret |
+| MANYREACH_API_KEY | Ter-set sebagai **secret** (send + verify fallback) | Cloudflare secret |
+| REOON_API_KEY | Ter-set sebagai **secret** (email verifier) | Cloudflare secret (2026-08-27) |
+| OUTSCRAPER_API_KEY | Ter-set sebagai **secret** (lead scraping) | Cloudflare secret (2026-08-27) |
 
 ### Yang belum diisi (perlu user input)
 | Key | Purpose | Where to get |
 |-----|---------|--------------|
-| HUNTER_API_KEY | Email lookup | https://hunter.io (free tier: 50 searches) |
-| MANYREACH_API_KEY | Email outreach | https://manyreach.com (user sudah punya akun) |
+| ANYMAIL_API_KEY | Email lookup (discovery) + verify | https://anymailfinder.com (user punya akun, 100 free credits) |
+| MANYREACH_API_KEY | Email outreach + verify (fallback) | https://manyreach.com (user sudah punya akun) |
 
 ### Cara isi via CLI (secrets)
 ```bash
 cd "F:\GCR Outreach App\backend"
 CLOUDFLARE_API_TOKEN=YOUR_CF_API_TOKEN \
 CLOUDFLARE_ACCOUNT_ID=d5cb3e4213b6aa69dbc2feb1499af77a \
-npx wrangler secret put HUNTER_API_KEY
+npx wrangler secret put ANYMAIL_API_KEY
 
 npx wrangler secret put MANYREACH_API_KEY
+
+npx wrangler secret put CF_AI_API_TOKEN
 ```
-> Catatan: vars di wrangler.toml TIDAK boleh sama nama dengan secret. Kalau nama binding sudah ada di `[vars]`, secret tidak bisa dibuat — hapus dulu dari vars lalu redeploy, baru set secret.
+> Catatan: vars di wrangler.toml TIDAK boleh sama nama dengan secret. Secret wajib di-set
+> via `npx wrangler secret put` (HUNTER_API_KEY sudah dihapus, tidak dipakai lagi).
+> Untuk dev lokal, taruh di `backend/.dev.vars`.
+
+### ⚠️ ManyReach API — fakta integrasi (diuji live 2026-08-18)
+Key user **VALID** (org "Nell VH's Company", saldo credit **295.895**). Tapi kode lama SALAH di 3 hal:
+1. **Base URL** — kode pakai `api.manyreach.com/v1` → benar: `api.manyreach.com/api/v2` (V2) / `api.manyreach.com/api` (V1). `/v1` balik 404.
+2. **Auth** — kode pakai `Authorization: Bearer` → benar V2: header **`X-API-Key`**; V1 pakai query `?apikey=`.
+3. **Model** — ManyReach adalah platform **drip-campaign** (campaign → prospect → sequence), BUKAN API "kirim 1 email sekali jalan". Tidak ada endpoint `POST /messages/send`.
+
+**Model yang diimplementasikan sekarang** (`backend/src/services/manyreach.ts`):
+- `createCampaign()` → 1 ManyReach campaign per GCR campaign (disimpan di `campaigns.manyreach_campaign_id`).
+- `addProspect()` → tiap contact = 1 prospect (pitch personal di field `icebreaker`).
+- `startCampaign()` → mulai sending (butuh sender terhubung di akun MR, else 422).
+- `getCampaignStatus()` → `GET /api/v2/campaigns/{id}/stats`.
+- `verifyEmails()` → `POST /api/v2/validation/emails` (verifikasi, fallback email-lookup).
+
+**Penting — currency beda:** verifikasi email ManyReach makan **Data Tokens** (TERPISAH dari credit pengiriman). Saldo token user = **0** → verify via ManyReach balik `402 INSUFFICIENT_DATA_TOKENS`. Makanya verify **Anymail primary**, ManyReach fallback graceful.
+
+**Next step user (send belum bisa test end-to-end):** ManyReach campaign butuh **sender/email terhubung & aktif** di dashboard MR sebelum `startCampaign` (else 422). User harus hubungkan sender di manyreach.com dulu.
+
+### ℹ️ Hunter.io — DIHAPUS (2026-08-20)
+Hunter.io tidak dipakai lagi. Akun user pernah **ter-restrict** (`429 restricted_account`) sehingga lookup mati.
+Diganti penuh dengan **Anymail Finder** (discovery + verify, akun aktif, 100 free credits, signup via Gmail OK).
+- `services/hunter.ts` jadi tombstone (tidak diimpor). `HUNTER_API_KEY` secret sudah di-`delete`.
+- Semua jalur lookup/verify sekarang: Anymail Finder (primary) → ManyReach (fallback verify).
+- Banyak catatan lama soal "Tomba/Anymail sebagai pengganti Hunter" di bawah sudah tidak relevan —
+  Anymail resmi jadi pengganti dan sudah terintegrasi.
 
 ### Cloudflare API Tokens
 | Token (truncated) | Permissions | Email |
@@ -312,37 +348,27 @@ CLOUDFLARE_API_TOKEN=... npx wrangler pages deploy dist --project-name gcr-outre
 
 ## 9b. Custom Domain: reach.gcrindex.org
 
-### Status (2026-08-06)
-- ❌ **BELUM aktif** — domain belum connect ke Cloudflare
-- Nameserver sekarang: `ns1.hostresolver.com` / `ns1.emu-dns.com` (bukan Cloudflare)
-- Domain tidak ada di 3 akun Cloudflare yang dicek
-- CORS backend sudah siap mengizinkan `https://reach.gcrindex.org`
+### Status (2026-08-20) — ✅ AKTIF
+- Domain `reach.gcrindex.org` **LIVE** → HTTPS 200, serve frontend yang sama dengan `pages.dev`.
+- DNS di **Spaceship** (registrar `gcrindex.org`): CNAME `reach` → `gcr-outreach-frontend.pages.dev`.
+- Custom domain didaftarkan di Cloudflare Pages project (`gcr-outreach-frontend`) via Cloudflare API;
+  TLS cert otomatis terbit dari Cloudflare setelah CNAME aktif.
+- **Tidak perlu rebuild/deploy ulang frontend** — custom domain menyerahkan deployment Pages yang ada.
+- CORS backend sudah mengizinkan `reach.gcrindex.org` (backend/src/index.ts).
 
-### Kenapa belum bisa otomatis
-Kedua API token tidak punya permission `Zone:Create`. Plus, mengubah nameserver domain **hanya bisa dilakukan user** di panel registrar — AI tidak punya akses ke sana.
+### Cara kerja (CNAME di registrar eksternal = Spaceship, bukan Cloudflare)
+1. Di panel DNS Spaceship untuk `gcrindex.org`, tambah:
+   - Type: **CNAME**, Name: `reach`, Target: `gcr-outreach-frontend.pages.dev`, TTL: Auto.
+2. Di Cloudflare Pages project `gcr-outreach-frontend` → daftarkan custom domain `reach.gcrindex.org`
+   (provisioning TLS). Bisa lewat dashboard **Custom domains** atau Cloudflare API
+   (`POST /accounts/{acct}/pages/projects/gcr-outreach-frontend/domains`).
+3. Setelah CNAME propagate, Cloudflare verifikasi + terbitkan sertifikat; site langsung jalan.
 
-### Langkah yang harus dilakukan user (pilih salah satu)
-
-**Opsi A — Pindah DNS ke Cloudflare (disarankan, SSL otomatis):**
-1. Login https://dash.cloudflare.com → **Add a site** → masukkan `gcrindex.org` → pilih **Free plan**
-2. Cloudflare akan kasih 2 nameserver (contoh: `ns1.something.ns.cloudflare.com`)
-3. Login ke panel registrar domain (emu-dns.com / hostresolver.com) → ganti nameserver ke punya Cloudflare
-4. Tunggu ~1-24 jam sampai status Active
-5. Di Pages project `gcr-outreach-frontend` → **Custom domains** → add `reach.gcrindex.org`
-6. Selesai — akses https://reach.gcrindex.org
-
-**Opsi B — CNAME di DNS provider sekarang (lebih cepat):**
-1. Login ke panel DNS `gcrindex.org` (emu-dns.com)
-2. Tambah record:
-   - Type: **CNAME**
-   - Name: `reach`
-   - Target: `gcr-outreach-frontend.pages.dev`
-   - Proxy: (jika bisa, aktifkan)
-3. Tunggu DNS propagate (~5-30 menit)
-4. Selesai — akses https://reach.gcrindex.org (tanpa SSL otomatis dari CF Pages jika proxy tidak aktif)
-
-### Catatan CORS
-Backend sudah allow origins: `gcr-outreach-frontend.pages.dev`, `reach.gcrindex.org`, `localhost:5173/4173` (backend/src/index.ts)
+### Catatan
+- Frontend produksi hardcode panggil `https://gcr-outreach-api.emerilansel.workers.dev`
+  (lihat `frontend/src/api/index.ts`, `import.meta.env.PROD`). API CORS allow `reach.gcrindex.org`.
+- Kalau mau API juga pakai subdomain `gcrindex.org` (mis. `api.gcrindex.org`), perlu tambah
+  custom domain di worker + ubah `API_URL` di frontend + redeploy frontend. Opsional.
 
 ---
 
@@ -353,7 +379,7 @@ Backend sudah allow origins: `gcr-outreach-frontend.pages.dev`, `reach.gcrindex.
 | Campaign CRUD | ✅ Done | Create, list, edit, delete |
 | Contact Import (CSV) | ✅ Done | Papa Parse, header auto-detect |
 | Contact Import (Manual) | ✅ Done | Form with validation |
-| Email Lookup (Hunter.io) | ✅ Done | Single + bulk, code ready |
+| Email Lookup (Anymail Finder) | ✅ Done | Single + bulk, deployed |
 | AI Personalization | ✅ Done | Cloudflare Workers AI (Llama 3.1) |
 | Message Preview/Edit | ✅ Done | Draft → Edit → Approve flow |
 | Email Send (ManyReach) | ✅ Done | Single + bulk, code ready |
@@ -381,10 +407,18 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 ## 12. Known Issues & TODOs
 
 ### Immediate
-- [ ] Isi HUNTER_API_KEY di wrangler.toml / Cloudflare secrets
-- [ ] Isi MANYREACH_API_KEY di wrangler.toml / Cloudflare secrets
-- [ ] Test email lookup flow dengan Hunter.io API key
-- [ ] Test email send flow dengan ManyReach API key
+- [x] Fix remote D1 schema: `manyreach_campaign_id` column missing (added migration `0002_add_manyreach_campaign_id.sql`, applied 2026-08-20)
+- [x] Hapus `HUNTER_API_KEY` sepenuhnya (secret deleted, code di-remove, ganti Anymail Finder)
+- [x] Set `ANYMAIL_API_KEY` sebagai **secret** (email lookup + verify)
+- [x] Set `MANYREACH_API_KEY` sebagai **secret** (email send + verify fallback)
+- [x] Test email lookup flow via Anymail (Patrick/Tony/Brian → email ditemukan, confidence 100)
+- [ ] Test email send flow dengan ManyReach API key (butuh sender/email terhubung di dashboard MR)
+
+### Bug fixes — sesi 2026-08-20
+- [x] **DELETE campaign gagal (500)** kalau punya contact yg sudah di-enrich → FK `email_enrichments.contact_id` / `messages.contact_id` ke `contacts.id`. Route delete sekarang hapus urut: messages → email_enrichments → contacts → campaign (`backend/src/routes/campaigns.ts`).
+- [x] **`created_at`/`updated_at` tersimpan sebagai string literal** `"(datetime('now'))"` (Drizzle `.default()` mengutipnya). Diubah ke `.default(sql\`(datetime('now'))\`)` di `backend/src/db/schema.ts` → sekarang simpan timestamp beneran (mis. `2026-08-20 09:23:42`). Teruji.
+- [x] **Hunter dihapus total** — secret `HUNTER_API_KEY` di-delete, `services/hunter.ts` jadi tombstone, semua jalur lookup/verify pakai Anymail Finder (+ ManyReach fallback verify). `wrangler.toml` & Env bindings dibersihkan.
+- [x] **Custom domain `reach.gcrindex.org` AKTIF** — CNAME di Spaceship → Pages, TLS Cloudflare otomatis (lihat section 9b).
 
 ### Future Enhancements
 - [ ] Multi-user auth (Cloudflare Access atau custom)
@@ -394,7 +428,7 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 - [ ] A/B testing untuk message variants
 - [ ] Webhook handler untuk real-time reply detection
 - [ ] Chrome extension untuk LinkedIn outreach
-- [ ] Custom domain untuk frontend — **proses sedang berjalan** (lihat section 9b)
+- [x] Custom domain untuk frontend — **SELESAI** (`reach.gcrindex.org`, lihat section 9b)
 
 ### Technical Debt
 - [ ] Code splitting untuk frontend (chunk > 500KB warning)
@@ -426,21 +460,80 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 
 | Service | Harga | Credits/bulan | API? | Notes |
 |---------|-------|---------------|------|-------|
-| **Hunter.io Free** | **$0** | 50/bulan | ✅ | Satu-satunya free tier dengan API |
+| **Anymail Finder (free)** | **$0** | 100 credits | ✅ | Free tier, cuma charge kalau ketemu verified |
 | **Tomba.io** | ~$44.50/5.000 credits | ~415/bulan (12 bln) | ✅ | Termurah per lookup, verification gratis |
 | **Anymail Finder** | $29-49/bulan | 400-1.000 | ✅ | Termurah per bulan, credit rollover |
 | **Snov.io** | $39/bulan | 1.000 | ✅ | Brand familiar |
-| **Hunter.io Starter** | $49/bulan | 2.000 | ✅ | |
 | **Prospeo** | $49/bulan | 2.000 | ✅ | Free tier 100/bln TANPA API |
 | **Skrapp.io** | $349/bulan | 50.000 | ⚠️ API hanya Enterprise | Tidak cocok |
 | **Apollo.io** | Mahal | - | ❌ **API hanya Custom plan** | Tidak murah |
 
 ### Rekomendasi (volume 100-500 lookup/bulan)
-1. **$0**: Hunter.io Free — 50 lookup/bulan, cukup untuk testing
-2. **Termurah per lookup**: Tomba.io — $44.50/5.000 credits, verification gratis
-3. **Termurah per bulan**: Anymail Finder $29/bulan — 400 verified, credit rollover
+1. **$0**: Anymail Finder — 100 free credits (cuma charge kalau ketemu verified)
+2. **Termurah per bulan**: Anymail Finder $29/bulan — 400 verified, credit rollover
+3. **Runner-up**: Snov.io ($30/1k), Apollo free (50/bulan, API gated paid)
 
-**Keputusan sekarang**: Tetap pakai integrasi **Hunter.io** yang sudah ada di code (menunggu API key). Kalau mau pindah ke Tomba/Anymail, tinggal tambah service baru di `backend/src/services/`.
+**Keputusan final (2026-08-20):** Pakai **Anymail Finder** sebagai satu-satunya email-discovery +
+verification (Hunter dihapus total, Tomba dibatalkan karena blokir Gmail-signup). Sending tetap ManyReach.
+
+> **Update 2026-08-20 — Anymail Finder sebagai pengganti Hunter (DONE & DEPLOYED):**
+> Akun Hunter user **pernah restricted**, jadi lookup via Hunter mati → **Hunter dihapus sepenuhnya**.
+> **Tomba.io DIBATALKAN** — melarang registrasi pakai domain mail Google (gmail), akun user Gmail.
+> Dipilih **Anymail Finder** (mengizinkan signup Gmail, no phone, pay-per-verified, $29/mo,
+> 100 free credits). **SUDAH DIIMPLEMENTASI & TERUJI LIVE 2026-08-20:**
+> - `backend/src/services/anymailfinder.ts` — `findPersonEmail` (POST /v5.1/find-email/person),
+>   `findCompanyEmails` (POST /v5.1/find-email/company), `verifyEmail` (POST /v5.1/verify-email),
+>   `getAccount` (GET /v5.1/account). Auth: `Authorization: Bearer`. Base `api.anymailfinder.com`.
+> - `email-lookup.ts`: route `POST /contact/:id` + `/bulk` + `/contact/:id/anymail` pakai Anymail.
+>   Verifikasi: Anymail primary → ManyReach fallback. `HUNTER_API_KEY` secret sudah di-delete.
+> - `ANYMAIL_API_KEY` di-set sebagai **secret** Cloudflare + binding di `index.ts`.
+> - Test end-to-end: lookup "Patrick Collison / stripe.com" → `patrick@stripe.com` (confidence 100),
+>   "Tony Xu / doordash.com" → `tony@doordash.com`, "Brian Chesky / airbnb.com" → `brian.chesky@airbnb.com`. ✅
+> - **Billing:** 1 credit cuma kalau ketemu email terverifikasi; not-found/invalid gratis.
+> - **Catatan:** Anymail = *finder + verifier* (field `email_status`), BUKAN verifikasi SMTP terpisah.
+>   Jalur verifikasi cadangan: ManyReach (butuh Data Token, saldo user 0 → graceful 402).
+
+### 🆕 2026-08-27 — Outscraper (lead scraping) + Reoon (email verifier) DONE & DEPLOYED
+
+Dua tool baru dari user diintegrasikan penuh, teruji live hari ini.
+
+**1. Outscraper — Lead / business scraping (Google Maps search)**
+- Service: `backend/src/services/outscraper.ts` — `searchMaps()` (sync) + `getJobResult()` (async poll) + `parseBusiness()`.
+- Auth: header **`X-API-KEY`** (bukan query `?api_key=` — SDK current pakai header; terverifikasi live). Base `https://api.app.outscraper.com`.
+- Endpoint: `GET /maps/search-v3`. Params: `query` (array), `organizationsPerQueryLimit` (= limit),
+  `language`, `region`, `dropDuplicates`, `enrichment` (e.g. `["emails"]`), `async`.
+- Response `data` bisa **flat array** (1 query) ATAU **array-of-arrays** (multi query) — parser tangani keduanya.
+- Field confirmed (live): `name`, `website`, `phone`, `address`, `city`, `state`, `subtypes`, `rating`, `reviews`, `latitude/longitude`, `place_id`, `business_status`. Enrichment tambah `emails`.
+- **Penting billing:** ~1 credit per row + ekstra untuk enrichment. Limit kecil saat testing.
+- **Rekomendasi limit saat testing (2026-08-27):** pakai **1–3** (jangan 20+). Tanpa enrichment `limit:3` ≈ 3 kredit; DENGAN enrichment tiap email yang ketemu nambah kredit lagi. Default UI modal di-set **3** (masih bisa diubah manual sampai 100) biar aman saat klik "Scrape". Naikkan ke 10–20 hanya kalau sudah yakin hasilnya pas.
+- Route: `backend/src/routes/leads.ts`
+  - `POST /api/leads/scrape/:campaignId` → cari leads, map ke `contacts` (source=`scrape`, simpan phone/address/rating/reviews/place_id), dedupe by `placeId`, tulis history ke `outscraper_jobs`.
+  - `GET /api/leads/jobs/:campaignId` → scrape history.
+- Frontend: tombol **"Scrape Leads"** di CampaignDetailPage (modal: query, limit, checkbox enrich emails).
+
+**2. Reoon Email Verifier — verifikasi SMTP**
+- Service: `backend/src/services/reoon.ts` — `verifyEmail()`.
+- Endpoint: `GET https://emailverifier.reoon.com/api/v1/verify`. Auth: query param **`key`** (BUKAN `api_key` — `api_key` ditolak, terverifikasi live). Params: `email`, `key`, `mode` (`power`|`quick`), `hard_validation`, `timeout`.
+- Response: `status` (`deliverable`|`invalid`|`risky`|`unknown`), `is_deliverable`, `is_safe_to_send`, `overall_score` (0-100), `is_valid_syntax`, `mx_records`, `is_catch_all`. Error envelope: `{status:"error", reason:...}`.
+- **Logika verifikasi:** `emailVerified=1` HANYA kalau `is_deliverable && is_safe_to_send`. `catch_all` (deliverable tapi safeToSend=false) → `verified:false` (tidak aman dikirim).
+- Route: `POST /api/email-lookup/verify/:id` sekarang 3 provider, urutan: **Reoon → Anymail → ManyReach**. Bisa paksa `provider` via body.
+- Frontend: tombol **"Verify"** (Reoon) muncul di tiap contact yang punya email, di tabel Contacts.
+
+**Schema changes (migration `0003_outscraper_reoon.sql`, APPLIED live 2026-08-27):**
+- `contacts`: + `source` (manual|csv|scrape), + `phone`, `address`, `rating`, `reviews`, `place_id`.
+- `outscraper_jobs`: tabel baru (campaign_id, outscraper_job_id, query, status, result_limit, found, results).
+
+**Secrets (Cloudflare Worker, di-set 2026-08-27):**
+- `REOON_API_KEY` ✅ — `MOCxT0DcJz2u45L9TPJlUg4LFrjhaXCi`
+- `OUTSCRAPER_API_KEY` ✅ — `NjM1OGZlNWRlZDBiNDMyNjkxYTU3NTA2YjYyOWYwOGZ8ZTJmOTg1YzM3NQ`
+- (juga taruh di `backend/.dev.vars` untuk dev lokal, gitignored)
+- Catatan `wrangler secret put` di v3.114 butuh flag `--name <worker>` (bukan `--account-id`).
+
+**Live test results (2026-08-27):**
+- Scrape "coffee shops jakarta" limit 3 → 3 contacts terimport (phone/address/rating/placeId tersimpan). ✅
+- Reoon verify `team@stripe.com` → `status: catch_all, verified: false, confidence: 71, safeToSend: false`. ✅
+- Reoon verify `test@gmail.com` (test awal) → `status: invalid`. ✅
+- Deploy: Worker `gcr-outreach-api` (version terbaru) + Frontend Pages `reach.gcrindex.org` (HTTP 200). ✅
 
 ---
 
@@ -452,6 +545,6 @@ To Do → Follow Up 1 → Follow Up 2 → Follow Up 3 → Closed
 | Cloudflare D1 | Free (5GB storage, 10M reads/day) |
 | Cloudflare Pages | Free |
 | Cloudflare Workers AI | Free (10K requests/day) |
-| Hunter.io | Free tier (50 searches) or $49/mo |
+| Anymail Finder | Free tier (100 credits) or $29/mo |
 | ManyReach | Pay-as-you-go credits |
 | **Total Minimum** | **$0/mo** |

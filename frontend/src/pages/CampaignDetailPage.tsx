@@ -35,6 +35,12 @@ export default function CampaignDetailPage() {
   });
   const [activeTab, setActiveTab] = useState<"contacts" | "messages">("contacts");
   const [selectedChannel, setSelectedChannel] = useState<"email" | "linkedin" | "twitter">("email");
+  const [showScrape, setShowScrape] = useState(false);
+  const [scrapeForm, setScrapeForm] = useState({
+    query: "",
+    limit: 3,
+    enrichment: true,
+  });
 
   const { data: campaign, isLoading: campaignLoading } = useQuery({
     queryKey: ["campaign", campaignId],
@@ -70,11 +76,47 @@ export default function CampaignDetailPage() {
     mutationFn: (contactId: number) => api.lookupEmail(contactId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      const label = data.source === "outscraper" ? "Outscraper" : data.source === "anymail" ? "Anymail" : "finder";
       if (data.email) {
-        toast.success(`Found: ${data.email} (${data.confidence}% confidence)`);
+        toast.success(`${label}: ${data.email}`);
       } else {
-        toast.error("No email found");
+        toast.error("No email found (none published on web)");
       }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  // Email verification (single contact) — provider selectable: reoon | manyreach
+  const verifyMutation = useMutation({
+    mutationFn: (args: { contactId: number; provider: string }) =>
+      api.verifyEmail(args.contactId, args.provider),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      const label = data.source === "manyreach" ? "ManyReach" : "Reoon";
+      if (data.verified) {
+        toast.success(`${label}: ${data.status} (${data.confidence ?? ""}% confidence)`);
+      } else if (data.error === "INSUFFICIENT_DATA_TOKENS" || data.error === "INSUFFICIENT_CREDITS") {
+        toast.error(`${label}: insufficient credits/data tokens — top up the account`);
+      } else {
+        toast.error(`${label}: ${data.status ?? data.error ?? "not safe to send"}`);
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  // Outscraper lead scraping
+  const scrapeMutation = useMutation({
+    mutationFn: (params: { query: string; limit: number; enrichment: boolean }) =>
+      api.scrapeLeads(campaignId, {
+        query: params.query,
+        limit: params.limit,
+        enrichment: params.enrichment ? ["emails"] : [],
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      setShowScrape(false);
+      setScrapeForm({ query: "", limit: 20, enrichment: true });
+      toast.success(`Scraped ${data.found} leads, imported ${data.imported} contacts!`);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -182,6 +224,14 @@ export default function CampaignDetailPage() {
           className="hidden"
           onChange={handleCSVUpload}
         />
+
+        <button
+          onClick={() => setShowScrape(true)}
+          className="btn-secondary text-sm"
+        >
+          <Search className="mr-1 h-4 w-4" />
+          Scrape Leads
+        </button>
 
         <div className="mx-2 h-6 w-px bg-gray-200" />
 
@@ -321,6 +371,97 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
+      {/* Scrape Leads Modal */}
+      {showScrape && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="card w-full max-w-lg">
+            <h2 className="mb-4 text-lg font-semibold">Scrape Leads (Outscraper)</h2>
+            <p className="mb-4 text-sm text-gray-500">
+              Search Google Maps for businesses and import them as contacts.
+              Keep the limit low while testing — Outscraper bills ~1 credit per result.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!scrapeForm.query.trim()) {
+                  toast.error("Enter a search query");
+                  return;
+                }
+                scrapeMutation.mutate({
+                  query: scrapeForm.query.trim(),
+                  limit: Number(scrapeForm.limit) || 20,
+                  enrichment: scrapeForm.enrichment,
+                });
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Search Query *
+                </label>
+                <input
+                  className="input"
+                  placeholder="e.g. coffee shops jakarta"
+                  value={scrapeForm.query}
+                  onChange={(e) => setScrapeForm({ ...scrapeForm, query: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Limit (max results)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    className="input"
+                    value={scrapeForm.limit}
+                    onChange={(e) =>
+                      setScrapeForm({ ...scrapeForm, limit: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={scrapeForm.enrichment}
+                      onChange={(e) =>
+                        setScrapeForm({ ...scrapeForm, enrichment: e.target.checked })
+                      }
+                    />
+                    Enrich with emails
+                  </label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowScrape(false)}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={scrapeMutation.isPending}
+                >
+                  {scrapeMutation.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="mr-1 h-4 w-4" />
+                  )}
+                  Scrape
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="flex gap-6">
@@ -419,13 +560,39 @@ export default function CampaignDetailPage() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
-                        <button
-                          onClick={() => generateMutation.mutate(contact.id)}
-                          disabled={generateMutation.isPending}
-                          className="text-xs text-brand-600 hover:text-brand-700"
-                        >
-                          Generate Pitch
-                        </button>
+                        <div className="flex items-center gap-3">
+                          {contact.email && (
+                            <span className="inline-flex items-center gap-1">
+                              <button
+                                onClick={() =>
+                                  verifyMutation.mutate({ contactId: contact.id, provider: "reoon" })
+                                }
+                                disabled={verifyMutation.isPending}
+                                className="text-xs text-emerald-600 hover:text-emerald-700"
+                                title="Verify email with Reoon"
+                              >
+                                Verify (Reoon)
+                              </button>
+                              <button
+                                onClick={() =>
+                                  verifyMutation.mutate({ contactId: contact.id, provider: "manyreach" })
+                                }
+                                disabled={verifyMutation.isPending}
+                                className="text-xs text-sky-600 hover:text-sky-700"
+                                title="Verify email with ManyReach"
+                              >
+                                (ManyReach)
+                              </button>
+                            </span>
+                          )}
+                          <button
+                            onClick={() => generateMutation.mutate(contact.id)}
+                            disabled={generateMutation.isPending}
+                            className="text-xs text-brand-600 hover:text-brand-700"
+                          >
+                            Generate Pitch
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
