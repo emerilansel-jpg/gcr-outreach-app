@@ -15,7 +15,7 @@ interface Env {
 const leadsRoutes = new Hono<{ Variables: { db: Database }; Bindings: Env }>();
 
 /**
- * Scrape leads via Outscraper (Google Maps search) and import them as contacts
+ * Scrape leads via Outscraper and import them as contacts
  * in a campaign. The search runs synchronously and returns the imported leads.
  *
  * Body:

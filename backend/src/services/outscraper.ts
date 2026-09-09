@@ -1,11 +1,11 @@
-// Outscraper API client — lead / business scraping (Google Maps search) and
+// Outscraper API client — lead / business scraping and
 // email/contact enrichment. Used to scrape fresh leads into campaigns.
 //
 //   Base:    https://api.app.outscraper.com
 //   Auth:    header `X-API-KEY` (the maintained SDK uses this; older docs use
 //            `?api_key=` but the header is canonical — verified 2026-08-27).
 //
-//   Google Maps Search: GET /maps/search-v3
+//   Search:  GET /maps/search-v3
 //     Params: query (array, repeated), language, region,
 //             organizationsPerQueryLimit (= "limit", max orgs per query),
 //             skipPlaces, dropDuplicates, enrichment (array, e.g. ["emails"]),
@@ -111,7 +111,7 @@ export interface AsyncJobTicket {
 }
 
 /**
- * Start a Google Maps search. If `async` is true, returns a job ticket to poll
+ * Start a search. If `async` is true, returns a job ticket to poll
  * with getJobResult(). If `async` is false (default), returns parsed leads.
  */
 export async function searchMaps(

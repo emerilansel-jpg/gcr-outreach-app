@@ -65,6 +65,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ channel }),
     }),
+  getCampaignMessages: (campaignId: number) =>
+    request<any[]>(`/messages/campaign/${campaignId}`),
   updateMessage: (id: number, data: any) =>
     request<any>(`/messages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   sendMessage: (id: number) =>
@@ -90,7 +92,7 @@ export const api = {
     }),
 
   // Leads (Outscraper scraping)
-  scrapeLeads: (campaignId: number, params: { query: string | string[]; limit?: number; enrichment?: string[] }) =>
+  scrapeLeads: (campaignId: number, params: { query: string | string[]; limit?: number; enrichment?: string[]; region?: string; language?: string }) =>
     request<any>(`/leads/scrape/${campaignId}`, {
       method: "POST",
       body: JSON.stringify(params),

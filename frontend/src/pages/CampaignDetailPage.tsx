@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -38,8 +38,10 @@ export default function CampaignDetailPage() {
   const [showScrape, setShowScrape] = useState(false);
   const [scrapeForm, setScrapeForm] = useState({
     query: "",
-    limit: 3,
+    limit: 20,
     enrichment: true,
+    region: "",
+    language: "en",
   });
 
   const { data: campaign, isLoading: campaignLoading } = useQuery({
@@ -106,16 +108,18 @@ export default function CampaignDetailPage() {
 
   // Outscraper lead scraping
   const scrapeMutation = useMutation({
-    mutationFn: (params: { query: string; limit: number; enrichment: boolean }) =>
+    mutationFn: (params: { query: string; limit: number; enrichment: boolean; region?: string; language?: string }) =>
       api.scrapeLeads(campaignId, {
         query: params.query,
         limit: params.limit,
         enrichment: params.enrichment ? ["emails"] : [],
+        region: params.region || undefined,
+        language: params.language || "en",
       }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
       setShowScrape(false);
-      setScrapeForm({ query: "", limit: 20, enrichment: true });
+      setScrapeForm({ query: "", limit: 20, enrichment: true, region: "", language: "en" });
       toast.success(`Scraped ${data.found} leads, imported ${data.imported} contacts!`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -377,7 +381,7 @@ export default function CampaignDetailPage() {
           <div className="card w-full max-w-lg">
             <h2 className="mb-4 text-lg font-semibold">Scrape Leads (Outscraper)</h2>
             <p className="mb-4 text-sm text-gray-500">
-              Search Google Maps for businesses and import them as contacts.
+              Search for businesses and import them as contacts.
               Keep the limit low while testing — Outscraper bills ~1 credit per result.
             </p>
             <form
@@ -391,6 +395,8 @@ export default function CampaignDetailPage() {
                   query: scrapeForm.query.trim(),
                   limit: Number(scrapeForm.limit) || 20,
                   enrichment: scrapeForm.enrichment,
+                  region: scrapeForm.region,
+                  language: scrapeForm.language,
                 });
               }}
               className="space-y-4"
@@ -407,7 +413,7 @@ export default function CampaignDetailPage() {
                   required
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">
                     Limit (max results)
@@ -415,7 +421,7 @@ export default function CampaignDetailPage() {
                   <input
                     type="number"
                     min={1}
-                    max={100}
+                    max={200}
                     className="input"
                     value={scrapeForm.limit}
                     onChange={(e) =>
@@ -423,6 +429,34 @@ export default function CampaignDetailPage() {
                     }
                   />
                 </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Region
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Jakarta, ID"
+                    value={scrapeForm.region}
+                    onChange={(e) => setScrapeForm({ ...scrapeForm, region: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">
+                    Language
+                  </label>
+                  <select
+                    className="select w-auto text-sm"
+                    value={scrapeForm.language}
+                    onChange={(e) => setScrapeForm({ ...scrapeForm, language: e.target.value })}
+                  >
+                    <option value="en">English</option>
+                    <option value="id">Indonesian</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="flex items-end">
                   <label className="flex items-center gap-2 text-sm text-gray-700">
                     <input
@@ -573,16 +607,6 @@ export default function CampaignDetailPage() {
                               >
                                 Verify (Reoon)
                               </button>
-                              <button
-                                onClick={() =>
-                                  verifyMutation.mutate({ contactId: contact.id, provider: "manyreach" })
-                                }
-                                disabled={verifyMutation.isPending}
-                                className="text-xs text-sky-600 hover:text-sky-700"
-                                title="Verify email with ManyReach"
-                              >
-                                (ManyReach)
-                              </button>
                             </span>
                           )}
                           <button
@@ -609,31 +633,26 @@ export default function CampaignDetailPage() {
 
       {/* Messages Tab */}
       {activeTab === "messages" && (
-        <MessagesTab contacts={contacts || []} campaignId={campaignId} />
+        <MessagesTab campaignId={campaignId} />
       )}
     </div>
   );
 }
 
-function MessagesTab({
-  contacts,
-  campaignId,
-}: {
-  contacts: any[];
-  campaignId: number;
-}) {
+function MessagesTab({ campaignId }: { campaignId: number }) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editBody, setEditBody] = useState("");
 
-  // Get all messages from all contacts
-  const allMessages = contacts.flatMap((c: any) =>
-    (c.messages || []).map((m: any) => ({ ...m, contactName: c.name }))
-  );
+  const { data: messages, isLoading } = useQuery({
+    queryKey: ["campaignMessages", campaignId],
+    queryFn: () => api.getCampaignMessages(campaignId),
+  });
 
   const sendMutation = useMutation({
     mutationFn: (msgId: number) => api.sendMessage(msgId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campaignMessages", campaignId] });
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
       toast.success("Message sent!");
     },
@@ -644,13 +663,21 @@ function MessagesTab({
     mutationFn: ({ id, data }: { id: number; data: any }) =>
       api.updateMessage(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      queryClient.invalidateQueries({ queryKey: ["campaignMessages", campaignId] });
       setEditingId(null);
       toast.success("Message updated");
     },
   });
 
-  if (allMessages.length === 0) {
+  if (isLoading) {
+    return (
+      <div className="flex h-32 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-600 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!messages || messages.length === 0) {
     return (
       <div className="card text-center py-12 text-gray-400">
         No messages generated yet. Generate pitches from the Contacts tab.
@@ -660,7 +687,7 @@ function MessagesTab({
 
   return (
     <div className="space-y-4">
-      {allMessages.map((msg: any) => (
+      {messages.map((msg: any) => (
         <div key={msg.id} className="card">
           <div className="mb-2 flex items-center justify-between">
             <div>
@@ -670,6 +697,11 @@ function MessagesTab({
               <span className="ml-2 text-xs text-gray-400">
                 {msg.channel}
               </span>
+              {msg.contactCompany && (
+                <span className="ml-2 text-xs text-gray-400">
+                  {msg.contactCompany}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span

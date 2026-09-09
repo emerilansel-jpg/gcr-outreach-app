@@ -42,7 +42,7 @@ export async function generatePersonalizedPitch(
     twitter: "Write a short, engaging Twitter/X DM or reply (under 280 chars).",
   };
 
-  const prompt = `You are an expert outreach copywriter. Generate a personalized ${channel} message.
+  const prompt = `You are an expert outreach copywriter. Generate a personalized ${channel} message OUTREACHING TO this person (writing FROM the perspective of GCR index org TO them).
 
 ## Mission Context
 Campaign: ${campaign.name}
@@ -52,8 +52,7 @@ ${campaign.targetAudience ? `Target Audience: ${campaign.targetAudience}` : ""}
 
 ## Contact Info
 Name: ${contact.name}
-${contact.company ? `Company: ${contact.company}` : ""}
-${contact.title ? `Title: ${contact.title}` : ""}
+${contact.company ? `Current Role/Position: ${contact.title}` : ""}
 ${contact.website ? `Website: ${contact.website}` : ""}
 ${contact.socialUrl ? `Social: ${contact.socialUrl}` : ""}
 
@@ -61,11 +60,14 @@ ${contact.socialUrl ? `Social: ${contact.socialUrl}` : ""}
 ${channelInstructions[channel]}
 
 ## Requirements
-- Be personal and reference specific details about the contact
+- Write as if contacting THIS PERSON directly (not about them)
+- Reference their specific details naturally in the message body
 - Be concise and value-focused
 - Include a clear call-to-action
 - Match the ${campaign.tone} tone
 - Do NOT be spammy or generic
+- Do NOT say "we acknowledge your staff" or similar meta-commentary
+- The message should be an OUTREACH email/msg TO the contact
 ${channel === "email" ? '- Return JSON: {"subject": "...", "body": "..."}' : '- Return JSON: {"body": "..."}'}
 
 Return ONLY valid JSON, no markdown.`;
