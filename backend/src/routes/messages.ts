@@ -14,6 +14,37 @@ interface Env {
 
 const messageRoutes = new Hono<{ Variables: { db: Database }; Bindings: Env }>();
 
+// Get all messages for a campaign (with contact info)
+messageRoutes.get("/campaign/:campaignId", async (c) => {
+  const db = c.get("db");
+  const campaignId = Number(c.req.param("campaignId"));
+
+  const result = await db
+    .select({
+      id: messages.id,
+      contactId: messages.contactId,
+      campaignId: messages.campaignId,
+      channel: messages.channel,
+      subject: messages.subject,
+      body: messages.body,
+      status: messages.status,
+      sentAt: messages.sentAt,
+      openedAt: messages.openedAt,
+      repliedAt: messages.repliedAt,
+      manyreachId: messages.manyreachId,
+      createdAt: messages.createdAt,
+      contactName: contacts.name,
+      contactEmail: contacts.email,
+      contactCompany: contacts.company,
+    })
+    .from(messages)
+    .innerJoin(contacts, eq(messages.contactId, contacts.id))
+    .where(eq(messages.campaignId, campaignId))
+    .orderBy(desc(messages.createdAt));
+
+  return c.json(result);
+});
+
 // Get messages for a contact
 messageRoutes.get("/contact/:contactId", async (c) => {
   const db = c.get("db");

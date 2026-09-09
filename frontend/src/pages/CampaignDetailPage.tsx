@@ -18,6 +18,20 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+const PRESET_REGIONS = [
+  { value: "", label: "All Regions (Global)" },
+  { value: "id", label: "Indonesia (ID)" },
+  { value: "sg", label: "Singapore (SG)" },
+  { value: "my", label: "Malaysia (MY)" },
+  { value: "us", label: "United States (US)" },
+  { value: "gb", label: "United Kingdom (GB)" },
+  { value: "au", label: "Australia (AU)" },
+  { value: "de", label: "Germany (DE)" },
+  { value: "nl", label: "Netherlands (NL)" },
+  { value: "jp", label: "Japan (JP)" },
+  { value: "other", label: "Other / Custom Region..." },
+];
+
 export default function CampaignDetailPage() {
   const { id } = useParams();
   const campaignId = Number(id);
@@ -40,7 +54,8 @@ export default function CampaignDetailPage() {
     query: "",
     limit: 20,
     enrichment: true,
-    region: "",
+    regionMode: "", // preset value or "other"
+    customRegion: "",
     language: "en",
   });
 
@@ -119,7 +134,7 @@ export default function CampaignDetailPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
       setShowScrape(false);
-      setScrapeForm({ query: "", limit: 20, enrichment: true, region: "", language: "en" });
+      setScrapeForm({ query: "", limit: 20, enrichment: true, regionMode: "", customRegion: "", language: "en" });
       toast.success(`Scraped ${data.found} leads, imported ${data.imported} contacts!`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -130,6 +145,7 @@ export default function CampaignDetailPage() {
       api.generatePitch(contactId, selectedChannel),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      queryClient.invalidateQueries({ queryKey: ["campaignMessages", campaignId] });
       toast.success("Pitch generated!");
     },
     onError: (err: Error) => toast.error(err.message),
@@ -139,6 +155,7 @@ export default function CampaignDetailPage() {
     mutationFn: () => api.generateAllPitches(campaignId, selectedChannel),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["contacts", campaignId] });
+      queryClient.invalidateQueries({ queryKey: ["campaignMessages", campaignId] });
       toast.success(`Generated ${data.generated} pitches!`);
     },
     onError: (err: Error) => toast.error(err.message),
@@ -391,11 +408,16 @@ export default function CampaignDetailPage() {
                   toast.error("Enter a search query");
                   return;
                 }
+                const effectiveRegion =
+                  scrapeForm.regionMode === "other"
+                    ? scrapeForm.customRegion.trim()
+                    : scrapeForm.regionMode;
+
                 scrapeMutation.mutate({
                   query: scrapeForm.query.trim(),
                   limit: Number(scrapeForm.limit) || 20,
                   enrichment: scrapeForm.enrichment,
-                  region: scrapeForm.region,
+                  region: effectiveRegion,
                   language: scrapeForm.language,
                 });
               }}
@@ -413,7 +435,56 @@ export default function CampaignDetailPage() {
                   required
                 />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+
+              {/* Region Selection with Box / Preset + Other */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5 space-y-2.5">
+                <label className="block text-sm font-medium text-gray-800">
+                  Region / Target Location
+                </label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-gray-500">Preset Country / Region</label>
+                    <select
+                      className="select text-sm w-full bg-white"
+                      value={scrapeForm.regionMode}
+                      onChange={(e) =>
+                        setScrapeForm({ ...scrapeForm, regionMode: e.target.value })
+                      }
+                    >
+                      {PRESET_REGIONS.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {scrapeForm.regionMode === "other" ? (
+                    <div>
+                      <label className="mb-1 block text-xs text-gray-500">Custom Region Code / Name</label>
+                      <input
+                        className="input text-sm bg-white"
+                        placeholder="e.g. TH, PH, FR, or city name"
+                        value={scrapeForm.customRegion}
+                        onChange={(e) =>
+                          setScrapeForm({ ...scrapeForm, customRegion: e.target.value })
+                        }
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-end pb-1 text-xs text-gray-400">
+                      {scrapeForm.regionMode ? (
+                        <span>Filtering to region code: <strong>{scrapeForm.regionMode.toUpperCase()}</strong></span>
+                      ) : (
+                        <span>Searching globally across all regions</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">
                     Limit (max results)
@@ -431,44 +502,33 @@ export default function CampaignDetailPage() {
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-gray-700">
-                    Region
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Jakarta, ID"
-                    value={scrapeForm.region}
-                    onChange={(e) => setScrapeForm({ ...scrapeForm, region: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">
                     Language
                   </label>
                   <select
-                    className="select w-auto text-sm"
+                    className="select w-full text-sm"
                     value={scrapeForm.language}
                     onChange={(e) => setScrapeForm({ ...scrapeForm, language: e.target.value })}
                   >
-                    <option value="en">English</option>
-                    <option value="id">Indonesian</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
+                    <option value="en">English (en)</option>
+                    <option value="id">Indonesian (id)</option>
+                    <option value="es">Spanish (es)</option>
+                    <option value="fr">French (fr)</option>
+                    <option value="de">German (de)</option>
+                    <option value="ja">Japanese (ja)</option>
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={scrapeForm.enrichment}
-                      onChange={(e) =>
-                        setScrapeForm({ ...scrapeForm, enrichment: e.target.checked })
-                      }
-                    />
-                    Enrich with emails
-                  </label>
-                </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={scrapeForm.enrichment}
+                    onChange={(e) =>
+                      setScrapeForm({ ...scrapeForm, enrichment: e.target.checked })
+                    }
+                  />
+                  Enrich with emails
+                </label>
               </div>
               <div className="flex justify-end gap-3">
                 <button
