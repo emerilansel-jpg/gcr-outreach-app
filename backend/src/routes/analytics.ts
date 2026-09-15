@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, count, sql } from "drizzle-orm";
+import { eq, and, count, sql } from "drizzle-orm";
 import { campaigns, contacts, messages } from "../db/schema";
 import type { Database } from "../db";
 
@@ -82,17 +82,17 @@ analyticsRoutes.get("/campaign/:id", async (c) => {
   const sentMessages = await db
     .select({ count: count() })
     .from(messages)
-    .where(eq(messages.campaignId, campaignId));
+    .where(and(eq(messages.campaignId, campaignId), eq(messages.status, "sent")));
 
   const openedMessages = await db
     .select({ count: count() })
     .from(messages)
-    .where(eq(messages.campaignId, campaignId));
+    .where(and(eq(messages.campaignId, campaignId), eq(messages.status, "opened")));
 
   const repliedMessages = await db
     .select({ count: count() })
     .from(messages)
-    .where(eq(messages.campaignId, campaignId));
+    .where(and(eq(messages.campaignId, campaignId), eq(messages.status, "replied")));
 
   const sent = sentMessages[0].count;
   const opened = openedMessages[0].count;
@@ -122,7 +122,7 @@ analyticsRoutes.get("/kanban/:campaignId", async (c) => {
     const result = await db
       .select({ count: count() })
       .from(contacts)
-      .where(eq(contacts.campaignId, campaignId));
+      .where(and(eq(contacts.campaignId, campaignId), eq(contacts.kanbanStage, stage)));
     stats[stage] = result[0].count;
   }
 

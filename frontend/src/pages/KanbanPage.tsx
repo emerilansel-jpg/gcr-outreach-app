@@ -116,10 +116,19 @@ function KanbanColumn({
 }
 
 export default function KanbanPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
-  const campaignId = Number(searchParams.get("campaign")) || 1;
+
+  const { data: campaigns } = useQuery({
+    queryKey: ["campaigns"],
+    queryFn: api.getCampaigns,
+  });
+
+  const campaignParam = searchParams.get("campaign");
+  const campaignId = campaignParam
+    ? Number(campaignParam)
+    : campaigns?.[0]?.id ?? 1;
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -130,11 +139,7 @@ export default function KanbanPage() {
   const { data: kanbanData, isLoading } = useQuery({
     queryKey: ["kanban", campaignId],
     queryFn: () => api.getKanban(campaignId),
-  });
-
-  const { data: campaigns } = useQuery({
-    queryKey: ["campaigns"],
-    queryFn: api.getCampaigns,
+    enabled: Boolean(campaignId),
   });
 
   const moveMutation = useMutation({
@@ -220,7 +225,7 @@ export default function KanbanPage() {
           className="select w-64"
           value={campaignId}
           onChange={(e) => {
-            window.location.href = `/kanban?campaign=${e.target.value}`;
+            setSearchParams({ campaign: e.target.value });
           }}
         >
           {(campaigns || []).map((c: any) => (

@@ -52,7 +52,8 @@ ${campaign.targetAudience ? `Target Audience: ${campaign.targetAudience}` : ""}
 
 ## Contact Info
 Name: ${contact.name}
-${contact.company ? `Current Role/Position: ${contact.title}` : ""}
+${contact.company ? `Company: ${contact.company}` : ""}
+${contact.title ? `Current Role/Position: ${contact.title}` : ""}
 ${contact.website ? `Website: ${contact.website}` : ""}
 ${contact.socialUrl ? `Social: ${contact.socialUrl}` : ""}
 

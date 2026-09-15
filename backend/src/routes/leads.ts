@@ -63,10 +63,13 @@ leadsRoutes.post("/scrape/:campaignId", async (c) => {
 
     const leads = result.leads;
     const imported = [];
-    const skipped = 0;
+    let skipped = 0;
 
     for (const lead of leads) {
-      if (!lead.name) continue;
+      if (!lead.name) {
+        skipped++;
+        continue;
+      }
 
       // De-dupe by placeId within the campaign.
       if (lead.placeId) {
@@ -79,7 +82,10 @@ leadsRoutes.post("/scrape/:campaignId", async (c) => {
               eq(contacts.placeId, lead.placeId)
             )
           );
-        if (existing.length > 0) continue;
+        if (existing.length > 0) {
+          skipped++;
+          continue;
+        }
       }
 
       const email = lead.emails?.[0] ?? null;

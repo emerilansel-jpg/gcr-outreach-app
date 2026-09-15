@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { eq, and, desc } from "drizzle-orm";
-import { contacts } from "../db/schema";
+import { contacts, messages, emailEnrichments } from "../db/schema";
 import type { Database } from "../db";
 
 const contactRoutes = new Hono<{ Variables: { db: Database } }>();
@@ -18,7 +18,8 @@ contactRoutes.get("/campaign/:campaignId", async (c) => {
 });
 
 // Get kanban board for a campaign (grouped by stage)
-const KANBAN_STAGES = ["todo", "contacted", "replied", "converted", "rejected"];
+// ponytail: stages synchronized with frontend STAGES.
+const KANBAN_STAGES = ["todo", "follow_up_1", "follow_up_2", "follow_up_3", "closed"];
 contactRoutes.get("/kanban/:campaignId", async (c) => {
   const db = c.get("db");
   const campaignId = Number(c.req.param("campaignId"));
@@ -206,6 +207,9 @@ contactRoutes.delete("/:id", async (c) => {
     return c.json({ error: "Contact not found" }, 404);
   }
 
+  // Cascade delete child messages & email enrichments before deleting contact
+  await db.delete(messages).where(eq(messages.contactId, id));
+  await db.delete(emailEnrichments).where(eq(emailEnrichments.contactId, id));
   await db.delete(contacts).where(eq(contacts.id, id));
   return c.json({ success: true });
 });

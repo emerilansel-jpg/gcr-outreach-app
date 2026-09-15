@@ -1,7 +1,7 @@
 # Coldstart — GCR Outreach App
 
 > Dokumen ini berisi konteks lengkap project untuk referensi cepat.
-> Dibuat: 2026-08-03 | Terakhir update: 2026-09-09
+> Dibuat: 2026-08-03 | Terakhir update: 2026-09-15
 
 ---
 
@@ -321,3 +321,40 @@ cd backend && npx wrangler d1 execute gcr-outreach-db --remote --command="SELECT
 ---
 
 *Generated & maintained by ZCode. Update whenever secrets, schema, or provider logic changes.*
+---
+
+## 2026-09-15 — Repository Audit & UX/Bug Analysis (PM Mode)
+- **Status:** COMPLETED
+- **Files touched:** `C:/Users/Noiro/Documents/Project Github Emeril/gcr-outreach-app/` (cloned), `coldstart/coldstart.md`
+- **Decisions:** 
+  - Clone target: `https://github.com/emerilansel-jpg/gcr-outreach-app.git` into subfolder `gcr-outreach-app`
+  - Scoring: 6.2/10
+  - Identified 7 backend/logic bugs (Kanban stage mismatch, broken analytics SQL, FK cascade deletes, prompt missing company, ManyReach icebreaker template missing)
+  - Identified 7 UX improvements (Bulk action buttons, search/filter/pagination, contact edit/delete, subject editing, responsive sidebar)
+- **Next:** Implement Phase 1 bug fixes, followed by Phase 2 UX enhancements.
+
+---
+
+## 2026-09-15 — Implementation Improvement Execution (PM Mode)
+- **Status:** COMPLETED
+- **Files touched:**
+  - `backend/src/routes/contacts.ts`: Fixed KANBAN_STAGES sync (`todo`, `follow_up_1`, `follow_up_2`, `follow_up_3`, `closed`), added cascade delete (messages + email enrichments).
+  - `backend/src/routes/analytics.ts`: Fixed SQL queries in `GET /campaign/:id` to filter by message status (`sent`, `opened`, `replied`), and `GET /kanban/:campaignId` to filter by stage.
+  - `backend/src/routes/campaigns.ts`: Added cascade delete for `outscraper_jobs` table on campaign deletion.
+  - `backend/src/routes/leads.ts`: Fixed `skipped` counter increment during duplicate placeId detection.
+  - `backend/src/services/ai.ts`: Fixed prompt formatting to properly include `Company: ${contact.company}` and `Current Role/Position: ${contact.title}`.
+  - `backend/src/services/manyreach.ts`: Fixed campaign template body to use `{icebreaker}` for personalized pitch delivery.
+  - `frontend/src/pages/CampaignDetailPage.tsx`: Added Bulk Find Emails button, Bulk Send Drafts button, search & filter toolbar (by text, stage, email status), table pagination, Edit Contact modal, Delete Contact action, and subject line editing in MessagesTab.
+  - `frontend/src/pages/KanbanPage.tsx`: Converted campaign switching to SPA searchParams (no full page reload) with safe fallback to `campaigns[0].id`.
+  - `frontend/src/components/Layout.tsx`: Added responsive mobile header, toggle hamburger drawer, and backdrop overlay for screens < 768px.
+- **Decisions:** Implemented minimal, non-breaking diffs conforming to existing patterns and types.
+- **Next:** User test / deploy to Cloudflare when ready.
+
+---
+
+## 2026-09-15 — Cloudflare Deployment (PM Mode)
+- **Status:** COMPLETED
+- **Token used:** `cfut_***` (Account: `d5cb3e4213b6aa69dbc2feb1499af77a` / emerilansel@gmail.com)
+- **Backend Worker Deploy:** `https://gcr-outreach-api.emerilansel.workers.dev` (vID: `aea0ec1c-a71b-49e0-b573-6dc560d4966d`)
+- **Frontend Pages Deploy:** `https://gcr-outreach-frontend.pages.dev` / `https://reach.gcrindex.org` (deploy preview: `https://064f3f9c.gcr-outreach-frontend.pages.dev`)
+- **Verification:** Worker health check 200 OK, Pages index 200 OK.

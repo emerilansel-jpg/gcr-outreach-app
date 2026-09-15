@@ -61,8 +61,8 @@ export async function createCampaign(
         fromName: params.fromName ?? "",
         replyToEmail: params.replyTo ?? "",
         subject: params.subject,
-        // Placeholder body — replaced per-prospect via icebreaker on add.
-        body: "Hello {firstName}, please see the message prepared for you.",
+        // Template body references the per-prospect personalized pitch stored in {icebreaker}
+        body: "{icebreaker}",
         trackOpens: true,
         trackClicks: false,
         dailyLimit: 50,
