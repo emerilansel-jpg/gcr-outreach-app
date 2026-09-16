@@ -44,6 +44,11 @@ export const api = {
     request<any>(`/contacts/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteContact: (id: number) =>
     request<any>(`/contacts/${id}`, { method: "DELETE" }),
+  bulkDeleteContacts: (contactIds: number[]) =>
+    request<any>("/contacts/bulk-delete", {
+      method: "POST",
+      body: JSON.stringify({ contactIds }),
+    }),
 
   // Kanban
   getKanban: (campaignId: number) =>
@@ -64,6 +69,11 @@ export const api = {
     request<any>(`/messages/generate-all/${campaignId}`, {
       method: "POST",
       body: JSON.stringify({ channel }),
+    }),
+  bulkGeneratePitches: (contactIds: number[], channel: string) =>
+    request<any>("/messages/bulk-generate", {
+      method: "POST",
+      body: JSON.stringify({ contactIds, channel }),
     }),
   getCampaignMessages: (campaignId: number) =>
     request<any[]>(`/messages/campaign/${campaignId}`),

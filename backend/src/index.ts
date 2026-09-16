@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createDb } from "./db";
+import { eq } from "drizzle-orm";
+import { messages, contacts } from "./db/schema";
 import campaignRoutes from "./routes/campaigns";
 import contactRoutes from "./routes/contacts";
 import messageRoutes from "./routes/messages";
@@ -67,12 +69,58 @@ app.route("/api/analytics", analyticsRoutes);
 app.route("/api/email-lookup", emailLookupRoutes);
 app.route("/api/leads", leadsRoutes);
 
-// ManyReach webhook endpoint
+// ManyReach webhook endpoint: processes delivered, opened, replied, and bounced events
 app.post("/api/webhooks/manyreach", async (c) => {
-  const body = await c.req.json();
-  // TODO: Process webhook - update message status, contact kanban stage
-  console.log("ManyReach webhook:", body);
-  return c.json({ received: true });
+  const db = c.get("db");
+  const body = await c.req.json<any>().catch(() => ({}));
+
+  const event = String(body.event || body.type || body.action || "").toLowerCase();
+  const leadId = String(
+    body.leadId ||
+    body.leadID ||
+    body.prospectId ||
+    body.prospect_id ||
+    body.data?.leadID ||
+    body.data?.leadId ||
+    ""
+  );
+  const email = body.email || body.recipient || body.data?.email;
+
+  if (!event && !leadId && !email) {
+    return c.json({ received: true, ignored: "empty_payload" });
+  }
+
+  // Find message by manyreachId or contact email
+  let targetMsg = null;
+  if (leadId) {
+    const found = await db.select().from(messages).where(eq(messages.manyreachId, leadId));
+    if (found.length > 0) targetMsg = found[0];
+  }
+  if (!targetMsg && email) {
+    const contactRows = await db.select().from(contacts).where(eq(contacts.email, email));
+    if (contactRows.length > 0) {
+      const found = await db.select().from(messages).where(eq(messages.contactId, contactRows[0].id));
+      if (found.length > 0) targetMsg = found[0];
+    }
+  }
+
+  if (targetMsg) {
+    const now = new Date().toISOString();
+    if (event.includes("open")) {
+      await db.update(messages).set({ status: "opened", openedAt: now }).where(eq(messages.id, targetMsg.id));
+    } else if (event.includes("reply") || event.includes("replied")) {
+      await db.update(messages).set({ status: "replied", repliedAt: now }).where(eq(messages.id, targetMsg.id));
+      await db.update(contacts).set({ status: "replied", kanbanStage: "closed", updatedAt: now }).where(eq(contacts.id, targetMsg.contactId));
+    } else if (event.includes("bounce")) {
+      await db.update(messages).set({ status: "bounced" }).where(eq(messages.id, targetMsg.id));
+      await db.update(contacts).set({ status: "bounced", updatedAt: now }).where(eq(contacts.id, targetMsg.contactId));
+    } else if (event.includes("deliver") || event.includes("sent")) {
+      await db.update(messages).set({ status: "sent", sentAt: targetMsg.sentAt || now }).where(eq(messages.id, targetMsg.id));
+      await db.update(contacts).set({ status: "contacted", kanbanStage: "follow_up_1", updatedAt: now }).where(eq(contacts.id, targetMsg.contactId));
+    }
+  }
+
+  return c.json({ received: true, matched: Boolean(targetMsg) });
 });
 
 // 404

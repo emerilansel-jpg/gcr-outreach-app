@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -9,6 +9,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragStartEvent,
   type DragEndEvent,
 } from "@dnd-kit/core";
@@ -69,14 +70,23 @@ function KanbanCard({ contact, onGenerate }: { contact: any; onGenerate: (id: nu
           <GripVertical className="h-4 w-4" />
         </div>
       </div>
-      {!contact.email && (
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
+        {contact.emailVerified ? (
+          <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+            Verified
+          </span>
+        ) : contact.email ? (
+          <span className="text-[10px] text-gray-400">Unverified</span>
+        ) : (
+          <span className="text-[10px] text-amber-600">No email</span>
+        )}
         <button
           onClick={() => onGenerate(contact.id)}
-          className="mt-2 w-full rounded border border-dashed border-gray-300 px-2 py-1 text-xs text-gray-500 hover:border-brand-400 hover:text-brand-600"
+          className="rounded border border-gray-200 px-2 py-0.5 text-xs text-brand-600 hover:border-brand-300 hover:bg-brand-50"
         >
-          + Generate Pitch
+          + Pitch
         </button>
-      )}
+      </div>
     </div>
   );
 }
@@ -90,10 +100,16 @@ function KanbanColumn({
   contacts: any[];
   onGenerate: (id: number) => void;
 }) {
+  const { setNodeRef, isOver } = useDroppable({ id: stage.id });
   const items = contacts.map((c) => String(c.id));
 
   return (
-    <div className={`flex min-w-[280px] flex-col rounded-xl border-2 ${stage.color} p-3`}>
+    <div
+      ref={setNodeRef}
+      className={`flex min-w-[280px] flex-col rounded-xl border-2 ${stage.color} p-3 transition-colors ${
+        isOver ? "ring-2 ring-brand-500 ring-offset-1" : ""
+      }`}
+    >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">{stage.label}</h3>
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-200 text-xs font-medium text-gray-600">
@@ -101,7 +117,7 @@ function KanbanColumn({
         </span>
       </div>
       <SortableContext items={items} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-1 flex-col gap-2 min-h-[100px]">
+        <div className="flex flex-1 flex-col gap-2 min-h-[120px]">
           {contacts.map((contact) => (
             <KanbanCard
               key={contact.id}
@@ -128,7 +144,13 @@ export default function KanbanPage() {
   const campaignParam = searchParams.get("campaign");
   const campaignId = campaignParam
     ? Number(campaignParam)
-    : campaigns?.[0]?.id ?? 1;
+    : campaigns?.[0]?.id ?? 0;
+
+  useEffect(() => {
+    if (!campaignParam && campaigns && campaigns.length > 0) {
+      setSearchParams({ campaign: String(campaigns[0].id) }, { replace: true });
+    }
+  }, [campaignParam, campaigns, setSearchParams]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -139,7 +161,7 @@ export default function KanbanPage() {
   const { data: kanbanData, isLoading } = useQuery({
     queryKey: ["kanban", campaignId],
     queryFn: () => api.getKanban(campaignId),
-    enabled: Boolean(campaignId),
+    enabled: Boolean(campaignId && campaignId > 0),
   });
 
   const moveMutation = useMutation({
@@ -223,11 +245,14 @@ export default function KanbanPage() {
         </div>
         <select
           className="select w-64"
-          value={campaignId}
+          value={campaignId || ""}
           onChange={(e) => {
             setSearchParams({ campaign: e.target.value });
           }}
         >
+          {(!campaigns || campaigns.length === 0) && (
+            <option value="">No Campaigns</option>
+          )}
           {(campaigns || []).map((c: any) => (
             <option key={c.id} value={c.id}>
               {c.name} ({c.contactCount} contacts)

@@ -3,7 +3,7 @@ import { eq, desc } from "drizzle-orm";
 import { messages, contacts, campaigns } from "../db/schema";
 import type { Database } from "../db";
 import { generatePersonalizedPitch } from "../services/ai";
-import { addProspect, createCampaign } from "../services/manyreach";
+import { addProspect, createCampaign, startCampaign } from "../services/manyreach";
 
 interface Env {
   DB: D1Database;
@@ -200,6 +200,73 @@ messageRoutes.post("/generate-all/:campaignId", async (c) => {
   return c.json({ generated: results.length, results });
 });
 
+// Bulk generate AI pitches for selected contact IDs
+messageRoutes.post("/bulk-generate", async (c) => {
+  const db = c.get("db");
+  const env = c.env;
+  const body = await c.req.json<{ contactIds: number[]; channel: "email" | "linkedin" | "twitter" }>();
+
+  if (!Array.isArray(body.contactIds) || body.contactIds.length === 0) {
+    return c.json({ error: "contactIds array is required" }, 400);
+  }
+
+  const results = [];
+  for (const contactId of body.contactIds) {
+    try {
+      const contactResult = await db.select().from(contacts).where(eq(contacts.id, contactId));
+      if (contactResult.length === 0) {
+        results.push({ contactId, error: "Contact not found" });
+        continue;
+      }
+      const contact = contactResult[0];
+
+      const campaignResult = await db.select().from(campaigns).where(eq(campaigns.id, contact.campaignId));
+      if (campaignResult.length === 0) {
+        results.push({ contactId, error: "Campaign not found" });
+        continue;
+      }
+      const campaign = campaignResult[0];
+
+      const pitch = await generatePersonalizedPitch(
+        env,
+        {
+          name: contact.name,
+          website: contact.website || undefined,
+          socialUrl: contact.socialUrl || undefined,
+          company: contact.company || undefined,
+          title: contact.title || undefined,
+          email: contact.email || undefined,
+        },
+        {
+          name: campaign.name,
+          missionContext: campaign.missionContext,
+          tone: campaign.tone || "professional",
+          targetAudience: campaign.targetAudience || undefined,
+        },
+        body.channel
+      );
+
+      const messageResult = await db
+        .insert(messages)
+        .values({
+          contactId: contact.id,
+          campaignId: contact.campaignId,
+          channel: body.channel,
+          subject: pitch.subject != null ? String(pitch.subject) : null,
+          body: typeof pitch.body === "string" ? pitch.body : JSON.stringify(pitch.body ?? ""),
+          status: "draft",
+        })
+        .returning();
+
+      results.push({ contactId: contact.id, success: true, message: messageResult[0] });
+    } catch (error) {
+      results.push({ contactId, error: (error as Error).message });
+    }
+  }
+
+  return c.json({ generated: results.filter((r) => r.success).length, results });
+});
+
 // Update message (edit draft)
 messageRoutes.put("/:id", async (c) => {
   const db = c.get("db");
@@ -242,6 +309,9 @@ async function queueMessageViaManyReach(
   if (!addResult.success) {
     return { success: false as const, error: addResult.error };
   }
+
+  // Ensure ManyReach campaign is active so prospect receives outreach
+  await startCampaign(env.MANYREACH_API_KEY, campaignId).catch(() => {});
 
   const updated = await db
     .update(messages)

@@ -214,4 +214,22 @@ contactRoutes.delete("/:id", async (c) => {
   return c.json({ success: true });
 });
 
+// Bulk delete contacts
+contactRoutes.post("/bulk-delete", async (c) => {
+  const db = c.get("db");
+  const body = await c.req.json<{ contactIds: number[] }>();
+
+  if (!Array.isArray(body.contactIds) || body.contactIds.length === 0) {
+    return c.json({ error: "contactIds array is required" }, 400);
+  }
+
+  for (const id of body.contactIds) {
+    await db.delete(messages).where(eq(messages.contactId, id));
+    await db.delete(emailEnrichments).where(eq(emailEnrichments.contactId, id));
+    await db.delete(contacts).where(eq(contacts.id, id));
+  }
+
+  return c.json({ success: true, deleted: body.contactIds.length });
+});
+
 export default contactRoutes;

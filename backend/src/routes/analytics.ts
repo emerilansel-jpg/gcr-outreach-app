@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { eq, and, count, sql } from "drizzle-orm";
+import { eq, and, count, sql, isNotNull, ne } from "drizzle-orm";
 import { campaigns, contacts, messages } from "../db/schema";
 import type { Database } from "../db";
 
@@ -72,7 +72,13 @@ analyticsRoutes.get("/campaign/:id", async (c) => {
   const withEmail = await db
     .select({ count: count() })
     .from(contacts)
-    .where(eq(contacts.campaignId, campaignId));
+    .where(
+      and(
+        eq(contacts.campaignId, campaignId),
+        isNotNull(contacts.email),
+        ne(contacts.email, "")
+      )
+    );
 
   const totalMessages = await db
     .select({ count: count() })
@@ -101,6 +107,7 @@ analyticsRoutes.get("/campaign/:id", async (c) => {
   return c.json({
     campaign: campaign[0],
     totalContacts: totalContacts[0].count,
+    withEmail: withEmail[0].count,
     totalMessages: totalMessages[0].count,
     sent,
     opened,

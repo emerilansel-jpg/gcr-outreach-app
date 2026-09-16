@@ -126,18 +126,23 @@ export async function searchMaps(
   }
   const data = (await response.json()) as Record<string, unknown>;
 
-  // Async job ticket
-  if (params.async && data.id) {
-    return {
-      async: true,
-      job: {
-        id: data.id as string,
-        status: (data.status as string) ?? "Pending",
-        resultsLocation:
-          (data.results_location as string) ??
-          `${BASE}/requests/${data.id}`,
-      },
-    };
+  // Async job ticket handling: if async requested or Outscraper queued it
+  if (data.id && (!data.data || data.status === "Pending" || data.status === "Processing")) {
+    if (params.async) {
+      return {
+        async: true,
+        job: {
+          id: data.id as string,
+          status: (data.status as string) ?? "Pending",
+          resultsLocation:
+            (data.results_location as string) ??
+            `${BASE}/requests/${data.id}`,
+        },
+      };
+    }
+    // Caller requested sync: poll async job to completion
+    const polledLeads = await getJobResult(apiKey, data.id as string, 50_000, 3_000);
+    return { async: false, leads: polledLeads };
   }
 
   // Sync: `data` is either array-of-arrays (one inner array per query) or a

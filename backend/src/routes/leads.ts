@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { eq, and } from "drizzle-orm";
 import { contacts, outscraperJobs } from "../db/schema";
 import type { Database } from "../db";
-import { searchMaps } from "../services/outscraper";
+import { searchMaps, getJobResult } from "../services/outscraper";
 
 interface Env {
   DB: D1Database;
@@ -56,12 +56,12 @@ leadsRoutes.post("/scrape/:campaignId", async (c) => {
       async: false,
     });
 
+    let leads = [];
     if (result.async) {
-      // Shouldn't happen with async:false, but guard anyway.
-      return c.json({ error: "Unexpected async response" }, 500);
+      leads = await getJobResult(env.OUTSCRAPER_API_KEY, result.job.id, 50_000, 3_000);
+    } else {
+      leads = result.leads;
     }
-
-    const leads = result.leads;
     const imported = [];
     let skipped = 0;
 

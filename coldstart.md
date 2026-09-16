@@ -358,3 +358,41 @@ cd backend && npx wrangler d1 execute gcr-outreach-db --remote --command="SELECT
 - **Backend Worker Deploy:** `https://gcr-outreach-api.emerilansel.workers.dev` (vID: `aea0ec1c-a71b-49e0-b573-6dc560d4966d`)
 - **Frontend Pages Deploy:** `https://gcr-outreach-frontend.pages.dev` / `https://reach.gcrindex.org` (deploy preview: `https://064f3f9c.gcr-outreach-frontend.pages.dev`)
 - **Verification:** Worker health check 200 OK, Pages index 200 OK.
+
+---
+
+## 2026-09-16 — UX & Codebase Audit + Improvement Plan (PM Mode)
+- **Status:** COMPLETED
+- **Branch:** `main` synced with `origin/main` (commit `3b3e692`); previous local work preserved in `backup-local-work`.
+- **UX Audit Score:** 6.8 / 10
+- **Critical Bugs Identified:**
+  1. Inverted Pitch logic on KanbanCard (`!contact.email` blocks pitching verified emails).
+  2. Broken drag-and-drop to empty Kanban columns (missing `useDroppable`).
+  3. ManyReach campaign never starts (`startCampaign` never invoked after prospect addition).
+  4. Worker timeout on `generate-all/:campaignId` (sequential LLM calls exceed 30s Worker limit).
+  5. ManyReach webhook handler is a no-op stub (delivery, open, reply events not tracked).
+  6. Broken analytics query for `withEmail` (`isNotNull` check omitted, dropped from payload).
+  7. Outscraper scrape drops async responses without polling `getJobResult`.
+- **UX Improvements Identified:**
+  1. Multi-row checkbox selection for table actions (generate, find emails, delete).
+  2. Company website & phone clickability in contact rows.
+  3. Modal scrollability & mobile keyboard overflow protection (`max-h-[90vh] overflow-y-auto`).
+  4. Search & status filtering inside Messages tab.
+  5. Campaign editing capability (metadata update without recreate).
+  6. Campaign-level drill-down in Analytics dashboard.
+- **Roadmap:** Phase 1 (Bugfixes & DND stability), Phase 2 (Multi-select bulk UX & Messages tab filters), Phase 3 (Webhooks & async jobs).
+
+---
+
+## 2026-09-16 — Implementation Execution (PM Mode)
+- **Status:** COMPLETED
+- **Files touched:**
+  - `frontend/src/pages/KanbanPage.tsx`: Removed inverted `!contact.email` check on pitch button; added `useDroppable` to `KanbanColumn` for empty column drop support; added safe campaign parameter syncing with `useEffect`.
+  - `backend/src/routes/analytics.ts`: Fixed `withEmail` query condition (`isNotNull` and `ne("")`); included `withEmail` in `/campaign/:id` response.
+  - `backend/src/services/manyreach.ts` & `backend/src/routes/messages.ts`: Added `startCampaign` invocation when messages are queued so ManyReach campaigns activate; added `POST /api/messages/bulk-generate` for server-side batching of selected contact IDs.
+  - `backend/src/services/outscraper.ts` & `backend/src/routes/leads.ts`: Added automatic async job polling fallback (`getJobResult`) when Outscraper queues sync scrape requests.
+  - `backend/src/routes/contacts.ts`: Added `POST /api/contacts/bulk-delete` with child cascade cleanup.
+  - `frontend/src/api/index.ts`: Added `bulkGeneratePitches` and `bulkDeleteContacts`.
+  - `frontend/src/pages/CampaignDetailPage.tsx`: Added multi-row checkbox selection with floating action bar (generate pitches, find emails, delete); added campaign summary metrics strip (5 cards); added Edit Campaign modal; added company website link with external icon and phone display in table; added modal scroll guards (`max-h-[90vh] overflow-y-auto`); added search & status filter toolbar in Messages tab with character counter.
+  - `backend/src/index.ts`: Implemented ManyReach webhook handler (`POST /api/webhooks/manyreach`) updating message timestamps and advancing contact stages.
+- **Verification:** Both backend (`npx tsc --noEmit`) and frontend (`npm run build`) passed with zero errors.
