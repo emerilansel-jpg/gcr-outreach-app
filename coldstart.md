@@ -396,3 +396,12 @@ cd backend && npx wrangler d1 execute gcr-outreach-db --remote --command="SELECT
   - `frontend/src/pages/CampaignDetailPage.tsx`: Added multi-row checkbox selection with floating action bar (generate pitches, find emails, delete); added campaign summary metrics strip (5 cards); added Edit Campaign modal; added company website link with external icon and phone display in table; added modal scroll guards (`max-h-[90vh] overflow-y-auto`); added search & status filter toolbar in Messages tab with character counter.
   - `backend/src/index.ts`: Implemented ManyReach webhook handler (`POST /api/webhooks/manyreach`) updating message timestamps and advancing contact stages.
 - **Verification:** Both backend (`npx tsc --noEmit`) and frontend (`npm run build`) passed with zero errors.
+
+---
+
+## 2026-09-16 — Cloudflare Deployment & Git Push (PM Mode)
+- **Status:** COMPLETED
+- **Git Commit:** `e80ef8e` pushed to `origin/main`.
+- **Backend Worker Deploy:** `https://gcr-outreach-api.emerilansel.workers.dev` (Version ID: `2ff0c057-6622-4222-8c3d-c5dcd26b9836`)
+- **Frontend Pages Deploy:** `https://gcr-outreach-frontend.pages.dev` / `https://reach.gcrindex.org` (deploy preview: `https://4ee197c2.gcr-outreach-frontend.pages.dev`)
+- **Verification:** Live endpoints verified: API health 200 OK, Pages 200 OK.
